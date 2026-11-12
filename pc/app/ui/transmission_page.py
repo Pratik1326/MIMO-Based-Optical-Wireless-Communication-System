@@ -1,0 +1,279 @@
+"""Live simplex transmitter with QR standby and endless binary carousel."""
+
+from dataclasses import replace
+from pathlib import Path
+import time
+
+import numpy as np
+from PyQt6.QtCore import QSettings, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
+
+from ..data.packetizer import Packetizer
+from ..mimo.splitter import SpatialLayout
+from ..optical.frame_generator import FrameGenerator, FrameRenderConfig
+from ..optical.optical_feedback_detector import OpticalFeedbackDetector
+from ..optical.qr_metadata import QRMetadata, create_metadata, generate_qr
+from ..optical.state_machine import TransmissionState, TransmissionStateMachine
+from ..optical.symbol_encoder import SymbolEncoder, SymbolMode
+from ..optical.timing import PrecisionTimer
+from .components.display_canvas import DisplayCanvas
+
+
+class TransmissionPage(QWidget):
+    diagnostics_changed = pyqtSignal(object)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.renderer = DisplayCanvas()
+        self.state_machine = TransmissionStateMachine(self)
+        self.timer: PrecisionTimer | None = None
+        self.feedback_detector = OpticalFeedbackDetector(parent=self)
+        self.acknowledgement = "NOT AVAILABLE"
+        self.packets = []
+        self.metadata: QRMetadata | None = None
+        self.qr_image: np.ndarray | None = None
+        self.frame_count = 0
+        self.current_packet = 0
+        self.carousel_cycle = 0
+        self._packet_index = 0
+        self.display_paced = False
+        self._started_at = 0.0
+        self._build_layout()
+        self.state_machine.state_changed.connect(self._on_state_changed)
+        self.state_machine.frame_ready.connect(self._on_frame_emitted, Qt.ConnectionType.QueuedConnection)
+        self.renderer.frameSwapped.connect(self._on_frame_swapped)
+        self.feedback_detector.pulse_detected.connect(self._on_pulse_detected)
+
+    def _build_layout(self) -> None:
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Live Binary Transmission"))
+        root.addWidget(self.renderer, 1)
+
+    def configure(self, path: str | Path, payload_size: int = 256, mimo_mode: str = "2x2", symbol_mode: str = "BINARY", fps: int = 10, compress: bool = True, stride: int | None = None) -> None:
+        self.stride = stride
+        selected_mode = SymbolMode.parse(symbol_mode)
+        source = Path(path)
+        data = source.read_bytes()
+        self.packets = list(Packetizer(payload_size=payload_size, compress=compress).packetize(data))
+        layout = SpatialLayout.parse(mimo_mode)
+        self.metadata = create_metadata(source.name, len(data), len(self.packets), layout.value, payload_size, symbol_mode=selected_mode.value)
+        self.qr_image = generate_qr(self.metadata, compact=True)
+        self.encoder = SymbolEncoder(cell_size=4, padding=1)
+        self.frame_generator = FrameGenerator(FrameRenderConfig(layout=layout))
+        self.fps = fps
+        if self.timer is not None:
+            self.timer.stop_clock()
+            self.timer = None
+        self.mimo_layout = layout
+        self.frame_count = 0
+        self.current_packet = 0
+        self.carousel_cycle = 0
+        self._packet_index = 0
+        self.acknowledgement = "NOT AVAILABLE"
+        self.state_machine.prepare()
+        self.renderer.set_frame(self.frame_generator.render_qr(self.qr_image))
+        self.renderer.update()
+
+        settings = QSettings("MIMO", "OpticalTransmitter")
+        if settings.value("optical_feedback_enabled", True, bool):
+            self.feedback_detector.camera_index = int(settings.value("webcam_index", 0))
+            self.feedback_detector.start_listening()
+
+        self._publish_diagnostics()
+
+    def start_transmission(self) -> None:
+        if not self.packets:
+            return
+        if getattr(self, "_qr_dialog", None) is not None:
+            try:
+                self._qr_dialog.accept()
+            except Exception:
+                pass
+            self._qr_dialog = None
+        self.state_machine.start()
+        self._started_at = time.perf_counter()
+        if not self.display_paced:
+            if self.timer is None:
+                self.timer = PrecisionTimer(self.fps, self)
+                self.timer.frame_tick.connect(self._render_tick)
+            self.timer.start_clock()
+
+        settings = QSettings("MIMO", "OpticalTransmitter")
+        if settings.value("optical_feedback_enabled", True, bool) and not self.feedback_detector.is_running:
+            self.feedback_detector.camera_index = int(settings.value("webcam_index", 0))
+            self.feedback_detector.start_listening()
+
+        self._publish_diagnostics()
+
+    def pause_transmission(self) -> None:
+        self.state_machine.pause()
+        if self.timer:
+            self.timer.pause_clock()
+        self._publish_diagnostics()
+
+    def resume_transmission(self) -> None:
+        self.state_machine.resume()
+        if self.timer:
+            self.timer.resume_clock()
+        self._publish_diagnostics()
+
+    def stop_transmission(self) -> None:
+        if self.timer:
+            self.timer.stop_clock()
+        self.feedback_detector.stop_listening()
+        self.state_machine.stop()
+        if self.qr_image is not None:
+            self.renderer.set_frame(self.frame_generator.render_qr(self.qr_image))
+            self.renderer.update()
+        self._publish_diagnostics()
+
+    def reset_transmission(self) -> None:
+        self.stop_transmission()
+        self.acknowledgement = "NOT AVAILABLE"
+        self.packets = []
+        self.metadata = None
+        self.qr_image = None
+        self.frame_count = 0
+        self.current_packet = 0
+        self.carousel_cycle = 0
+        self._packet_index = 0
+        self._publish_diagnostics()
+
+    @pyqtSlot(str, int, str)
+    def _on_pulse_detected(self, pattern: str, count: int, description: str) -> None:
+        if pattern == "ACK":
+            # REJECT spurious ACK if not actively transmitting
+            if self.state_machine.state is not TransmissionState.TRANSMITTING:
+                return
+            # REJECT premature ACK if we haven't transmitted a reasonable fraction of packets
+            min_packets = max(2, len(self.packets) // 2) if self.packets else 2
+            if self.frame_count < min_packets:
+                return
+
+            self.acknowledgement = "RECEIVED (ACK - Transfer Complete)"
+            settings = QSettings("MIMO", "OpticalTransmitter")
+            if settings.value("auto_stop_on_ack", True, bool):
+                self.stop_transmission()
+        elif pattern == "NACK":
+            if self.state_machine.state is not TransmissionState.TRANSMITTING:
+                return
+            self.acknowledgement = f"NACK (Retransmission requested - {count} pulses)"
+            if self.packets:
+                settings = QSettings("MIMO", "OpticalTransmitter")
+                stride = settings.value("mimo_stride", 4, type=int)
+                self._packet_index = max(0, self._packet_index - stride * 2)
+        elif pattern == "READY":
+            if self.state_machine.state == TransmissionState.WAITING_FOR_RECEIVER:
+                self.acknowledgement = "LOCKED (Receiver ready - Starting transmission)"
+                self.start_transmission()
+        self._publish_diagnostics()
+
+    def show_qr(self) -> None:
+        if self.qr_image is None:
+            return
+        if getattr(self, "_qr_dialog", None) is not None:
+            try:
+                self._qr_dialog.raise_()
+                self._qr_dialog.activateWindow()
+                return
+            except Exception:
+                self._qr_dialog = None
+        dialog = QDialog(self)
+        self._qr_dialog = dialog
+        dialog.setWindowTitle("Pre-Flight QR Handshake")
+        label = QLabel(dialog)
+        image = QImage(self.qr_image.data, self.qr_image.shape[1], self.qr_image.shape[0], self.qr_image.strides[0], QImage.Format.Format_Grayscale8).copy()
+        label.setPixmap(QPixmap.fromImage(image))
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(label)
+        dialog.resize(image.width() + 24, image.height() + 24)
+        dialog.finished.connect(lambda: setattr(self, "_qr_dialog", None))
+        dialog.show()
+
+    def _render_tick(self, index: int, _timestamp: float, _diagnostic: object) -> None:
+        if self.state_machine.state is not TransmissionState.TRANSMITTING:
+            return
+        packet_position = self._packet_index
+        packet = self.packets[packet_position]
+        self.current_packet = packet_position + 1
+        min_bytes = (self.metadata.packet_size + 15) if self.metadata else 0
+        stride = 1
+        if self.mimo_layout.channel_count == 1:
+            matrices = {0: self.encoder.encode(packet.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)}
+        else:
+            matrices = {}
+            configured_stride = getattr(self, "stride", None)
+            if configured_stride is None:
+                configured_stride = 1
+            if configured_stride in (1, 2, 4):
+                stride = min(configured_stride, self.mimo_layout.channel_count, max(1, len(self.packets)))
+
+            # Spatial diversity rotation: Shift channel mapping by 1 each carousel pass
+            # so packets never get permanently trapped in a glare-affected or blurred quadrant!
+            channel_rotation = self.carousel_cycle % self.mimo_layout.channel_count
+
+            if stride == 2 and self.mimo_layout.channel_count == 4:
+                # 2x Redundancy mode (Channels 0, 1 = current packets; Channels 2, 3 = previous packets)
+                prev_pos = (packet_position - 2) % len(self.packets)
+                packet_indices = [
+                    packet_position % len(self.packets),
+                    (packet_position + 1) % len(self.packets),
+                    prev_pos % len(self.packets),
+                    (prev_pos + 1) % len(self.packets),
+                ]
+                for channel_id, p_idx in enumerate(packet_indices):
+                    eff_ch = (channel_id + channel_rotation) % self.mimo_layout.channel_count
+                    p = self.packets[p_idx]
+                    if p.channel_id != eff_ch:
+                        p = replace(p, channel_id=eff_ch)
+                    matrices[eff_ch] = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+            else:
+                for channel_id in range(self.mimo_layout.channel_count):
+                    p_idx = (packet_position + channel_id) % len(self.packets)
+                    eff_ch = (channel_id + channel_rotation) % self.mimo_layout.channel_count
+                    p = self.packets[p_idx]
+                    if p.channel_id != eff_ch:
+                        p = replace(p, channel_id=eff_ch)
+                    matrices[eff_ch] = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+
+        self.state_machine.emit_frame(self.frame_generator.render(matrices))
+        self.frame_count += 1
+        self._packet_index += stride
+        if self._packet_index >= len(self.packets):
+            self._packet_index = 0
+            self.carousel_cycle += 1
+        self._publish_diagnostics()
+
+    @pyqtSlot(object, int)
+    def _on_frame_emitted(self, frame_matrix: np.ndarray, _frame_index: int) -> None:
+        self.renderer.set_frame(frame_matrix)
+        self.renderer.update()
+
+    def _on_state_changed(self, _old: object, _new: object) -> None:
+        self._publish_diagnostics()
+
+    def _on_frame_swapped(self) -> None:
+        if self.display_paced and self.state_machine.state is TransmissionState.TRANSMITTING and not self.state_machine.paused:
+            self._render_tick(self.state_machine.frame_index, time.perf_counter(), None)
+
+    def _publish_diagnostics(self) -> None:
+        metadata = self.metadata
+        elapsed = time.perf_counter() - self._started_at if self._started_at else 0.0
+        self.diagnostics_changed.emit({
+            "state": self.state_machine.state.value,
+            "qr_status": "GENERATED" if self.qr_image is not None else "NOT GENERATED",
+            "session_id": metadata.session_id if metadata else "--",
+            "filename": metadata.filename if metadata else "--",
+            "file_size": metadata.file_size if metadata else 0,
+            "total_packets": metadata.total_packets if metadata else 0,
+            "mimo_mode": metadata.mimo_mode if metadata else "--",
+            "symbol_mode": metadata.symbol_mode if metadata else "BINARY",
+            "packet_size": metadata.packet_size if metadata else 0,
+            "target_fps": self.fps if metadata else 0,
+            "current_packet": f"{self.current_packet}/{len(self.packets)}" if self.packets else "0/0",
+            "carousel_cycle": self.carousel_cycle,
+            "frames_transmitted": self.frame_count,
+            "actual_fps": self.frame_count / elapsed if elapsed > 0 else 0.0,
+            "acknowledgement": self.acknowledgement,
+        })

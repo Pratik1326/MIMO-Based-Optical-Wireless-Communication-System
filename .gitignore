@@ -1,0 +1,74 @@
+# ==============================================================================
+# MIMO OPTICAL COMMUNICATION SYSTEM - UNIFIED MONOREPO .GITIGNORE
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Python Artifacts & Virtual Environments
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# ------------------------------------------------------------------------------
+# 2. Android & Gradle Build Artifacts
+# ------------------------------------------------------------------------------
+.gradle/
+**/build/
+android/app/build/
+android/build/
+android/.gradle/
+android/.kotlin/
+*.apk
+*.aab
+
+# ------------------------------------------------------------------------------
+# 3. Android Studio, IntelliJ IDEA & VS Code
+# ------------------------------------------------------------------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+.vscode/
+
+# ------------------------------------------------------------------------------
+# 4. Machine-Specific SDK Configuration & Secrets
+# ------------------------------------------------------------------------------
+local.properties
+*.keystore
+*.jks
+
+# ------------------------------------------------------------------------------
+# 5. Media & Large Artifacts (Keep repository lightweight for fast git sync)
+# ------------------------------------------------------------------------------
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.zip
+*.tar.gz
+*.7z
+
+# Duplicate nested extraction folder
+Mimo-optical-communication/
+
+# ------------------------------------------------------------------------------
+# 6. Operating System & Log Files
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log

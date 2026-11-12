@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-09-10T15:30:10Z",
+  "environment": {
+    "python": "3.12.4",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "frame_generation": [
+    {
+      "layout": "1x1",
+      "iterations": 10,
+      "mean_ms_per_frame": 2.69889,
+      "min_ms_per_frame": 1.3058,
+      "max_ms_per_frame": 9.1836
+    },
+    {
+      "layout": "2x2",
+      "iterations": 10,
+      "mean_ms_per_frame": 2.15746,
+      "min_ms_per_frame": 1.617,
+      "max_ms_per_frame": 2.8963
+    },
+    {
+      "layout": "4x4",
+      "iterations": 10,
+      "mean_ms_per_frame": 1.84978,
+      "min_ms_per_frame": 1.6565,
+      "max_ms_per_frame": 2.2082
+    }
+  ],
+  "theoretical_throughput": [
+    {
+      "layout": "1x1",
+      "fps": 30,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 7680,
+      "kilobytes_per_second": 7.5
+    },
+    {
+      "layout": "1x1",
+      "fps": 60,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 15360,
+      "kilobytes_per_second": 15.0
+    },
+    {
+      "layout": "1x1",
+      "fps": 120,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 30720,
+      "kilobytes_per_second": 30.0
+    },
+    {
+      "layout": "2x2",
+      "fps": 30,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 30720,
+      "kilobytes_per_second": 30.0
+    },
+    {
+      "layout": "2x2",
+      "fps": 60,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 61440,
+      "kilobytes_per_second": 60.0
+    },
+    {
+      "layout": "2x2",
+      "fps": 120,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 122880,
+      "kilobytes_per_second": 120.0
+    },
+    {
+      "layout": "4x4",
+      "fps": 30,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 122880,
+      "kilobytes_per_second": 120.0
+    },
+    {
+      "layout": "4x4",
+      "fps": 60,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 245760,
+      "kilobytes_per_second": 240.0
+    },
+    {
+      "layout": "4x4",
+      "fps": 120,
+      "payload_size_bytes": 256,
+      "bytes_per_second": 491520,
+      "kilobytes_per_second": 480.0
+    }
+  ],
+  "fec": {
+    "scheme": "RS(255,223)",
+    "iterations": 10,
+    "payload_size_bytes": 223,
+    "encoded_size_bytes": 255,
+    "parity_symbols": 32,
+    "mean_encode_ms": 0.84207,
+    "cpu_utilization_percent": 100.0
+  }
+}
