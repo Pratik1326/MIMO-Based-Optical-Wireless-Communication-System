@@ -38,6 +38,23 @@ class QrMetadataParser {
             if (res != null) return parseJsonMetadata(res)
         }
 
+        // 1b. Tier 1b: ZXing on central inset of warped matrix (isolates QR card and eliminates peripheral edge artifacts)
+        if (secondaryMat != null && !secondaryMat.empty()) {
+            val insetW = (secondaryMat.cols() * 0.06).toInt()
+            val insetH = (secondaryMat.rows() * 0.06).toInt()
+            val innerW = secondaryMat.cols() - insetW * 2
+            val innerH = secondaryMat.rows() - insetH * 2
+            if (innerW > 100 && innerH > 100) {
+                val centerSub = secondaryMat.submat(org.opencv.core.Rect(insetW, insetH, innerW, innerH))
+                try {
+                    val res = decodeMatZxing(centerSub)
+                    if (res != null) return parseJsonMetadata(res)
+                } finally {
+                    centerSub.release()
+                }
+            }
+        }
+
         // 2. Tier 2: ZXing on raw camera frame
         if (!primaryMat.empty()) {
             val res = decodeMatZxing(primaryMat)

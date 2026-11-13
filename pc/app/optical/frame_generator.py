@@ -18,7 +18,7 @@ class FrameRenderConfig:
     height: int = 800
     layout: SpatialLayout | str = SpatialLayout.GRID_2X2
     border_thickness: int = 4
-    grid_thickness: int = 3
+    grid_thickness: int = 1
     marker_size: int = 44
     marker_margin: int = 6
 
@@ -28,8 +28,8 @@ class FrameGenerator:
         self.config = config or FrameRenderConfig()
         if self.config.width <= 0 or self.config.height <= 0:
             raise ValueError("frame dimensions must be positive")
-        if self.config.border_thickness <= 0 or self.config.grid_thickness <= 0:
-            raise ValueError("border and grid thickness must be positive")
+        if self.config.border_thickness <= 0 or self.config.grid_thickness < 0:
+            raise ValueError("border thickness must be positive and grid thickness cannot be negative")
         self.layout = SpatialLayout.parse(self.config.layout)
         self.anchors = ArucoAnchorGenerator(self.config.marker_size, self.config.marker_margin)
 
@@ -74,12 +74,13 @@ class FrameGenerator:
                 block = self._as_bgr(matrix)
                 resized = cv2.resize(block, (x1 - x0, y1 - y0), interpolation=cv2.INTER_NEAREST)
                 frame[y0:y1, x0:x1] = resized
-        for coordinate in range(1, side):
-            x = inner_left + coordinate * inner_width // side
-            y = inner_top + coordinate * inner_height // side
-            cv2.line(frame, (x, inner_top), (x, inner_top + inner_height - 1), (0, 0, 0), self.config.grid_thickness)
-            cv2.line(frame, (inner_left, y), (inner_left + inner_width - 1, y), (0, 0, 0), self.config.grid_thickness)
-        cv2.rectangle(frame, (inner_left, inner_top), (inner_left + inner_width - 1, inner_top + inner_height - 1), (0, 0, 0), self.config.grid_thickness)
+        if self.config.grid_thickness > 0:
+            for coordinate in range(1, side):
+                x = inner_left + coordinate * inner_width // side
+                y = inner_top + coordinate * inner_height // side
+                cv2.line(frame, (x, inner_top), (x, inner_top + inner_height - 1), (0, 0, 0), self.config.grid_thickness)
+                cv2.line(frame, (inner_left, y), (inner_left + inner_width - 1, y), (0, 0, 0), self.config.grid_thickness)
+            cv2.rectangle(frame, (inner_left, inner_top), (inner_left + inner_width - 1, inner_top + inner_height - 1), (0, 0, 0), self.config.grid_thickness)
         
         # Apply anchors, then apply the safe zone margin
         frame = self.anchors.place(frame)
@@ -106,16 +107,29 @@ class FrameGenerator:
         )
 
         # Scale QR code to fit cleanly inside the white card with quiet margins (prevents warp clipping)
-        max_qr_size = min(card_width, card_height) - 48
+        max_qr_size = min(card_width, card_height) - 96
         if max_qr_size <= 0:
             raise ValueError("frame is too small for the configured QR area")
         qr = np.asarray(qr_image, dtype=np.uint8)
         if qr.ndim != 2 or qr.size == 0:
             raise ValueError("qr_image must be a non-empty grayscale image")
-        scale = min(max_qr_size / qr.shape[1], max_qr_size / qr.shape[0])
-        width = max(1, round(qr.shape[1] * scale))
-        height = max(1, round(qr.shape[0] * scale))
-        resized = cv2.resize(qr, (width, height), interpolation=cv2.INTER_NEAREST)
+        qr_h, qr_w = qr.shape[:2]
+        if qr_w <= max_qr_size and qr_h <= max_qr_size and qr_w >= 300:
+            # Already properly sized with clean quiet zone
+            resized = qr
+            width, height = qr_w, qr_h
+        elif qr_w < 300:
+            # Small raw QR: scale up using exact integer multiple to preserve finder patterns
+            factor = max(1, max_qr_size // qr_w)
+            width = qr_w * factor
+            height = qr_h * factor
+            resized = cv2.resize(qr, (width, height), interpolation=cv2.INTER_NEAREST)
+        else:
+            scale = min(max_qr_size / qr_w, max_qr_size / qr_h)
+            width = max(1, round(qr_w * scale))
+            height = max(1, round(qr_h * scale))
+            resized = cv2.resize(qr, (width, height), interpolation=cv2.INTER_NEAREST)
+
         left = card_inset + (card_width - width) // 2
         top = card_inset + (card_height - height) // 2
         frame[top : top + height, left : left + width] = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)

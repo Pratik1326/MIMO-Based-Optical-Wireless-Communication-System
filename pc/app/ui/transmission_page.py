@@ -146,9 +146,15 @@ class TransmissionPage(QWidget):
             # REJECT spurious ACK if not actively transmitting
             if self.state_machine.state is not TransmissionState.TRANSMITTING:
                 return
-            # REJECT premature ACK if we haven't transmitted a reasonable fraction of packets
-            min_packets = max(2, len(self.packets) // 2) if self.packets else 2
-            if self.frame_count < min_packets:
+            # REJECT premature ACK: Require at least one full carousel cycle and a safe minimum frame count
+            min_required_frames = max(len(self.packets), 8) if self.packets else 8
+            if self.carousel_cycle < 1 or self.frame_count < min_required_frames:
+                logger.info(
+                    "Spurious/Premature ACK rejected: carousel_cycle=%d, frame_count=%d (min required frames=%d)",
+                    self.carousel_cycle,
+                    self.frame_count,
+                    min_required_frames,
+                )
                 return
 
             self.acknowledgement = "RECEIVED (ACK - Transfer Complete)"
@@ -156,13 +162,16 @@ class TransmissionPage(QWidget):
             if settings.value("auto_stop_on_ack", True, bool):
                 self.stop_transmission()
         elif pattern == "NACK":
-            if self.state_machine.state is not TransmissionState.TRANSMITTING:
-                return
-            self.acknowledgement = f"NACK (Retransmission requested - {count} pulses)"
-            if self.packets:
-                settings = QSettings("MIMO", "OpticalTransmitter")
-                stride = settings.value("mimo_stride", 4, type=int)
-                self._packet_index = max(0, self._packet_index - stride * 2)
+            if self.state_machine.state is TransmissionState.WAITING_FOR_RECEIVER:
+                # 2-pulse handshake from receiver also unlocks transmission
+                self.acknowledgement = "LOCKED (Receiver ready - Starting transmission)"
+                self.start_transmission()
+            elif self.state_machine.state is TransmissionState.TRANSMITTING:
+                self.acknowledgement = f"NACK (Retransmission requested - {count} pulses)"
+                if self.packets:
+                    settings = QSettings("MIMO", "OpticalTransmitter")
+                    stride = settings.value("mimo_stride", 4, type=int)
+                    self._packet_index = max(0, self._packet_index - stride * 2)
         elif pattern == "READY":
             if self.state_machine.state == TransmissionState.WAITING_FOR_RECEIVER:
                 self.acknowledgement = "LOCKED (Receiver ready - Starting transmission)"

@@ -15,11 +15,12 @@ class OpticalFeedbackController {
     }
 
     /**
-     * Pattern 1: Receiver Locked & Ready (1 pulse, 280ms)
+     * Pattern 1: Receiver Locked & Ready (2 distinct pulses, 200ms ON / 150ms OFF)
+     * Dual-pulse signature ensures complete immunity against single ambient light glints.
      */
     fun sendReadySignal() {
-        Log.i("OPTICAL_FEEDBACK", "Sending Pattern 1: READY / LOCKED")
-        pulse(count = 1, pulseDurationMs = 280, gapDurationMs = 200)
+        Log.i("OPTICAL_FEEDBACK", "Sending Pattern 1: READY / LOCKED (2 pulses)")
+        pulse(count = 2, pulseDurationMs = 200, gapDurationMs = 150)
     }
 
     /**

@@ -65,7 +65,7 @@ def create_metadata(
     )
 
 
-def generate_qr(metadata: QRMetadata, box_size: int = 8, border: int = 4, compact: bool = True) -> np.ndarray:
+def generate_qr(metadata: QRMetadata, box_size: int = 12, border: int = 4, compact: bool = True) -> np.ndarray:
     """Return a grayscale uint8 QR image containing the exact metadata JSON."""
     if box_size <= 0 or border < 0:
         raise ValueError("box_size must be positive and border cannot be negative")

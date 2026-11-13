@@ -136,11 +136,11 @@ class OpticalFeedbackDetector(QObject):
         # Either:
         # 1. Saturated cluster surge (delta_sat >= 20 and max_val >= 245)
         # 2. Significant flare jump (delta_p98 >= 14.0 and max_val >= 245 and sat_count >= (baseline_sat + 8))
-        # 3. Overall luminance surge (delta_mean >= self.threshold_delta and delta_p98 >= 10.0)
+        # 3. Overall luminance surge (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 240)
         is_flash_now = (
             (delta_sat >= 20 and max_val >= 245)
             or (delta_p98 >= 14.0 and max_val >= 245 and sat_count >= (baseline_sat + 8))
-            or (delta_mean >= self.threshold_delta and delta_p98 >= 10.0)
+            or (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 240)
         )
 
         # Rising edge: Flash turns ON
@@ -165,7 +165,14 @@ class OpticalFeedbackDetector(QObject):
             return None
 
         # Sustained strobe check: A continuous bright flash >= 0.65s (up to 1.25s)
-        if is_high and (now - pulse_start) >= 0.65 and not state.get("ack_fired_during_strobe", False):
+        # Only fires if accompanied by a strong saturated point source (delta_sat >= 20 or sat_count >= baseline_sat + 15)
+        if (
+            is_high
+            and (now - pulse_start) >= 0.65
+            and (delta_sat >= 20 or sat_count >= (baseline_sat + 15))
+            and max_val >= 245
+            and not state.get("ack_fired_during_strobe", False)
+        ):
             state["ack_fired_during_strobe"] = True
             state["burst_count"] = 0
             detected_event = ("ACK", 3, "Transfer Verified & Complete (Sustained Strobe >= 650ms)")

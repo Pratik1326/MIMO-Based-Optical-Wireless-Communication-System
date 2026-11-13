@@ -118,3 +118,4 @@ Explain Git actions in simple, friendly terms:
 When asked to write code:
 **STOP $\to$ CHECK BRANCH $\to$ VERIFY TESTS $\to$ PRESERVE WORK $\to$ REPORT STATUS.**
 Always prioritize project safety, data preservation, and the 2-tester approval mandate over quick execution.
+

@@ -51,7 +51,7 @@ class PacketAssembler {
                     val b2 = headerBytes[10].toInt() and 0xFF
                     val payloadLength = (b1 shl 8) or b2
 
-                    if (payloadLength <= 0 || payloadLength > 512) {
+                    if (payloadLength <= 0 || payloadLength > 2048) {
                         continue
                     }
 

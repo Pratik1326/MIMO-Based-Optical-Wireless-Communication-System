@@ -79,3 +79,83 @@ def test_endless_carousel_wraps_packet_buffer(qapp, tmp_path: Path) -> None:
     assert page.state_machine.state.value == "TRANSMITTING"
     page.stop_transmission()
     window.close()
+
+
+def test_mimo_2x2_end_to_end_optical_render_and_quadrant_demodulation(qapp) -> None:
+    import cv2, json, numpy as np
+    from pc.app.optical.qr_metadata import create_metadata, generate_qr
+    from pc.app.optical.frame_generator import FrameGenerator, FrameRenderConfig
+    from pc.app.optical.symbol_encoder import SymbolEncoder, SymbolMode
+    from pc.app.protocol.packet import Packet, FrameType
+
+    fg = FrameGenerator(FrameRenderConfig(width=800, height=800, layout="2x2"))
+
+    # 1. Verify Phase 1 QR Handshake under simulated 768x768 perspective warp
+    meta = create_metadata("MIMO_Test2.txt", 884, 4, "2x2", 128)
+    qr = generate_qr(meta)
+    qr_frame = fg.render_qr(qr)
+    inner_qr = qr_frame[136:824, 136:824]
+    w768_qr = cv2.resize(cv2.cvtColor(inner_qr, cv2.COLOR_BGR2GRAY), (768, 768), interpolation=cv2.INTER_LINEAR)
+    detector = cv2.QRCodeDetector()
+    text, _, _ = detector.detectAndDecode(w768_qr)
+    assert bool(text)
+    parsed = json.loads(text)
+    assert (parsed.get("filename") or parsed.get("f")) == "MIMO_Test2.txt"
+    assert (parsed.get("total_packets") or parsed.get("p")) == 4
+    assert (parsed.get("mimo_mode") or parsed.get("m")) == "2x2"
+    assert (parsed.get("packet_size") or parsed.get("z")) == 128
+
+    # 2. Verify Phase 2 2x2 Spatial Channel Multiplexing under simulated 768x768 warp
+    enc = SymbolEncoder(cell_size=8, padding=1)
+    packets = [
+        Packet(FrameType.DATA, channel_id=ch, sequence_id=ch, payload=f"Quadrant_{ch}_payload_data".encode())
+        for ch in range(4)
+    ]
+    matrices = {
+        ch: enc.encode(packets[ch].to_bytes(), SymbolMode.BINARY, min_bytes=143)
+        for ch in range(4)
+    }
+    data_frame = fg.render(matrices)
+
+    # Simulated phone camera un-warp to 768x768
+    inner_data = data_frame[136:824, 136:824]
+    w768_data = cv2.resize(cv2.cvtColor(inner_data, cv2.COLOR_BGR2GRAY), (768, 768), interpolation=cv2.INTER_LINEAR)
+
+    # Slice into 4 quadrants (384x384 each)
+    half = 384
+    quadrants = [
+        w768_data[:half, :half],
+        w768_data[:half, half:],
+        w768_data[half:, :half],
+        w768_data[half:, half:]
+    ]
+
+    data_side = 34
+    grid_side = 36
+    cell_size = 384 / grid_side
+    inset = cell_size * 0.25
+
+    for ch_idx, quad in enumerate(quadrants):
+        bits = []
+        for r in range(1, data_side + 1):
+            y0 = int(r * cell_size + inset)
+            y1 = int((r + 1) * cell_size - inset)
+            for c in range(1, data_side + 1):
+                x0 = int(c * cell_size + inset)
+                x1 = int((c + 1) * cell_size - inset)
+                cell_mean = np.mean(quad[y0:y1, x0:x1])
+                bits.append(1 if cell_mean > 127 else 0)
+
+        byte_arr = bytearray()
+        for b in range(0, len(bits) - 7, 8):
+            byte_val = 0
+            for bit_i in range(8):
+                byte_val = (byte_val << 1) | bits[b + bit_i]
+            byte_arr.append(byte_val)
+
+        expected_pkt_len = 11 + len(packets[ch_idx].payload) + 4
+        decoded_pkt = Packet.from_bytes(bytes(byte_arr[:expected_pkt_len]))
+        assert decoded_pkt.channel_id == ch_idx
+        assert decoded_pkt.sequence_id == ch_idx
+        assert decoded_pkt.payload == packets[ch_idx].payload
+

@@ -15,10 +15,10 @@ class PerspectiveCorrector {
         // Inner corners of ArUco markers span 50 px to 750 px (width = 700 px).
         // Central data area spans 56 px to 744 px (width = 688 px).
         // The 6 px quiet margin on each side corresponds to:
-        // 6.0 * (512.0 / 688.0) = 4.465116 px in 512x512 warped space.
+        // 6.0 * (768.0 / 688.0) = 6.697674 px in 768x768 warped space.
         private const val INNER_MARKER_SPAN = 700.0
         private const val DATA_AREA_SPAN = 688.0
-        private const val TARGET_WARP_SIZE = 512.0
+        private const val TARGET_WARP_SIZE = 768.0
         private const val MARGIN_OFFSET = (INNER_MARKER_SPAN - DATA_AREA_SPAN) / 2.0 * (TARGET_WARP_SIZE / DATA_AREA_SPAN)
     }
 
