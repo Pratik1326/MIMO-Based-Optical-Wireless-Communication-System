@@ -57,13 +57,13 @@ fun TransmitterScreen() {
     var selectedMimoMode by remember { mutableStateOf("2x2") }
     var selectedFps by remember { mutableIntStateOf(15) }
     var selectedPacketSize by remember { mutableIntStateOf(64) }
-    var autoStartCountdown by remember { mutableIntStateOf(5) }
-    var enableAutoCountdown by remember { mutableStateOf(true) }
+    var autoStartCountdown by remember { mutableIntStateOf(0) }
+    var enableAutoCountdown by remember { mutableStateOf(false) }
 
-    // Automatic stream countdown: gives the receiver 5 seconds to scan QR metadata before auto-starting optical stream hands-free
+    // Stream countdown: only active if user explicitly enables timer
     LaunchedEffect(stats.state, enableAutoCountdown) {
         if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
-            autoStartCountdown = 5
+            autoStartCountdown = 10
             while (autoStartCountdown > 0 && enableAutoCountdown) {
                 kotlinx.coroutines.delay(1000)
                 if (enableAutoCountdown) {
@@ -84,9 +84,13 @@ fun TransmitterScreen() {
         }
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            if (stats.state == TransmissionState.TRANSMITTING) {
-                engine.stop()
-            }
+        }
+    }
+
+    // Clean up engine when user navigates away from the Transmitter tab
+    DisposableEffect(Unit) {
+        onDispose {
+            engine.stop()
         }
     }
 
@@ -488,14 +492,14 @@ fun TransmitterScreen() {
                             OutlinedButton(
                                 onClick = {
                                     enableAutoCountdown = !enableAutoCountdown
-                                    if (enableAutoCountdown) autoStartCountdown = 5
+                                    if (enableAutoCountdown) autoStartCountdown = 10
                                 },
                                 modifier = Modifier.height(52.dp),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(if (enableAutoCountdown) Icons.Default.Pause else Icons.Default.AccessTime, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (enableAutoCountdown) "Pause (5s)" else "Auto (5s)", fontWeight = FontWeight.Bold)
+                                Text(if (enableAutoCountdown) "Pause (${autoStartCountdown}s)" else "Timer (10s)", fontWeight = FontWeight.Bold)
                             }
                         }
 
