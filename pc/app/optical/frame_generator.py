@@ -92,8 +92,8 @@ class FrameGenerator:
         border = self.config.border_thickness
         cv2.rectangle(frame, (0, 0), (self.config.width - 1, self.config.height - 1), (255, 255, 255), border)
         
-        # Center data area boundaries (matching PerspectiveCorrector 688x688 region)
-        card_inset = self.config.marker_size + self.config.marker_margin * 2
+        # Center data area boundaries with 10px dark isolation moat to prevent optical bloom into ArUco markers
+        card_inset = self.config.marker_size + self.config.marker_margin * 2 + 10
         card_width = self.config.width - card_inset * 2
         card_height = self.config.height - card_inset * 2
 

@@ -1,13 +1,16 @@
 """Live simplex transmitter with QR standby and endless binary carousel."""
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 import time
 
 import numpy as np
-from PyQt6.QtCore import QSettings, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QSettings, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
+
+logger = logging.getLogger(__name__)
 
 from ..data.packetizer import Packetizer
 from ..mimo.splitter import SpatialLayout
@@ -39,6 +42,11 @@ class TransmissionPage(QWidget):
         self._packet_index = 0
         self.display_paced = False
         self._started_at = 0.0
+        self._auto_start_timer = QTimer(self)
+        self._auto_start_timer.setSingleShot(True)
+        self._auto_start_timer.timeout.connect(self._on_auto_start_timeout)
+        self._packet_matrix_cache: dict[tuple[int, int], np.ndarray] = {}
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_layout()
         self.state_machine.state_changed.connect(self._on_state_changed)
         self.state_machine.frame_ready.connect(self._on_frame_emitted, Qt.ConnectionType.QueuedConnection)
@@ -71,6 +79,17 @@ class TransmissionPage(QWidget):
         self.carousel_cycle = 0
         self._packet_index = 0
         self.acknowledgement = "NOT AVAILABLE"
+
+        # Pre-encode all packet matrices once for zero allocations during playback
+        min_bytes = (self.metadata.packet_size + 15) if self.metadata else 0
+        self._packet_matrix_cache.clear()
+        for p_idx, packet in enumerate(self.packets):
+            for eff_ch in range(self.mimo_layout.channel_count):
+                p = replace(packet, channel_id=eff_ch)
+                self._packet_matrix_cache[(p_idx, eff_ch)] = self.encoder.encode(
+                    p.to_bytes(), selected_mode, min_bytes=min_bytes
+                )
+
         self.state_machine.prepare()
         self.renderer.set_frame(self.frame_generator.render_qr(self.qr_image))
         self.renderer.update()
@@ -80,11 +99,38 @@ class TransmissionPage(QWidget):
             self.feedback_detector.camera_index = int(settings.value("webcam_index", 0))
             self.feedback_detector.start_listening()
 
+        # Auto-start fallback timer: If optical flash is missed or receiver is slow to signal,
+        # auto-transition to active transmission after 6s so the system never sits idle
+        auto_start_delay = int(settings.value("auto_start_delay_sec", 6))
+        if auto_start_delay > 0:
+            self._auto_start_timer.start(auto_start_delay * 1000)
+
         self._publish_diagnostics()
+
+    def _on_auto_start_timeout(self) -> None:
+        if self.state_machine.state is TransmissionState.WAITING_FOR_RECEIVER and self.packets:
+            logger.info("Auto-start timeout reached -> Beginning transmission automatically")
+            self.acknowledgement = "AUTO-START (QR Handshake Window Elapsed)"
+            self.start_transmission()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.state_machine.state is TransmissionState.WAITING_FOR_RECEIVER:
+                self.start_transmission()
+            elif self.state_machine.state is TransmissionState.TRANSMITTING:
+                if self.state_machine.paused:
+                    self.resume_transmission()
+                else:
+                    self.pause_transmission()
+        elif event.key() == Qt.Key.Key_Escape:
+            self.stop_transmission()
+        else:
+            super().keyPressEvent(event)
 
     def start_transmission(self) -> None:
         if not self.packets:
             return
+        self._auto_start_timer.stop()
         if getattr(self, "_qr_dialog", None) is not None:
             try:
                 self._qr_dialog.accept()
@@ -119,6 +165,7 @@ class TransmissionPage(QWidget):
         self._publish_diagnostics()
 
     def stop_transmission(self) -> None:
+        self._auto_start_timer.stop()
         if self.timer:
             self.timer.stop_clock()
         self.feedback_detector.stop_listening()
@@ -209,7 +256,10 @@ class TransmissionPage(QWidget):
         min_bytes = (self.metadata.packet_size + 15) if self.metadata else 0
         stride = 1
         if self.mimo_layout.channel_count == 1:
-            matrices = {0: self.encoder.encode(packet.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)}
+            mat = self._packet_matrix_cache.get((packet_position, 0))
+            if mat is None:
+                mat = self.encoder.encode(packet.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+            matrices = {0: mat}
         else:
             matrices = {}
             configured_stride = getattr(self, "stride", None)
@@ -233,18 +283,20 @@ class TransmissionPage(QWidget):
                 ]
                 for channel_id, p_idx in enumerate(packet_indices):
                     eff_ch = (channel_id + channel_rotation) % self.mimo_layout.channel_count
-                    p = self.packets[p_idx]
-                    if p.channel_id != eff_ch:
-                        p = replace(p, channel_id=eff_ch)
-                    matrices[eff_ch] = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+                    mat = self._packet_matrix_cache.get((p_idx, eff_ch))
+                    if mat is None:
+                        p = replace(self.packets[p_idx], channel_id=eff_ch)
+                        mat = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+                    matrices[eff_ch] = mat
             else:
                 for channel_id in range(self.mimo_layout.channel_count):
                     p_idx = (packet_position + channel_id) % len(self.packets)
                     eff_ch = (channel_id + channel_rotation) % self.mimo_layout.channel_count
-                    p = self.packets[p_idx]
-                    if p.channel_id != eff_ch:
-                        p = replace(p, channel_id=eff_ch)
-                    matrices[eff_ch] = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+                    mat = self._packet_matrix_cache.get((p_idx, eff_ch))
+                    if mat is None:
+                        p = replace(self.packets[p_idx], channel_id=eff_ch)
+                        mat = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+                    matrices[eff_ch] = mat
 
         self.state_machine.emit_frame(self.frame_generator.render(matrices))
         self.frame_count += 1

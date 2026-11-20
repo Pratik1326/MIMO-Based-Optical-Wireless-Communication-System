@@ -134,13 +134,13 @@ class OpticalFeedbackDetector(QObject):
         # Flash ON condition:
         # Requires a genuine differential surge above the ambient baseline!
         # Either:
-        # 1. Saturated cluster surge (delta_sat >= 20 and max_val >= 245)
-        # 2. Significant flare jump (delta_p98 >= 14.0 and max_val >= 245 and sat_count >= (baseline_sat + 8))
-        # 3. Overall luminance surge (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 240)
+        # 1. Saturated cluster surge (delta_sat >= 10 and max_val >= 230)
+        # 2. Significant flare jump (delta_p98 >= 12.0 and max_val >= 230 and sat_count >= (baseline_sat + 5))
+        # 3. Overall luminance surge (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 230)
         is_flash_now = (
-            (delta_sat >= 20 and max_val >= 245)
-            or (delta_p98 >= 14.0 and max_val >= 245 and sat_count >= (baseline_sat + 8))
-            or (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 240)
+            (delta_sat >= 10 and max_val >= 230)
+            or (delta_p98 >= 12.0 and max_val >= 230 and sat_count >= (baseline_sat + 5))
+            or (delta_mean >= self.threshold_delta and delta_p98 >= 10.0 and max_val >= 230)
         )
 
         # Rising edge: Flash turns ON

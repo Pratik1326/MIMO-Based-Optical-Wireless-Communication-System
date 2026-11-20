@@ -98,9 +98,11 @@ class SymbolDecoder {
 
             // High-precision 2-Means dynamic cluster thresholding
             val localThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax)
-            lastMin = sampleMin
-            lastMax = sampleMax
-            lastThreshold = localThreshold
+            if (chIndex == 0) {
+                lastMin = sampleMin
+                lastMax = sampleMax
+                lastThreshold = localThreshold
+            }
 
             // Binarize symbols against precise data-core dynamic range for this channel
             val chBits = ByteArray(bitsPerQuadrant)

@@ -1,9 +1,10 @@
-﻿package com.example.mimo_optical_receiver.ui
+package com.example.mimo_optical_receiver.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -19,17 +20,19 @@ import androidx.navigation.compose.rememberNavController
 import com.example.mimo_optical_receiver.ui.screens.HomeScreen
 import com.example.mimo_optical_receiver.ui.screens.ScannerScreen
 import com.example.mimo_optical_receiver.ui.screens.SettingsScreen
+import com.example.mimo_optical_receiver.ui.screens.TransmitterScreen
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Home : Screen("home", "Home", Icons.Default.Home)
-    object Scanner : Screen("scanner", "Scanner", Icons.Default.PlayArrow)
+    object Transmitter : Screen("transmitter", "Send", Icons.Default.Sensors)
+    object Scanner : Screen("scanner", "Receive", Icons.Default.CameraAlt)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
 
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-    val items = listOf(Screen.Home, Screen.Scanner, Screen.Settings)
+    val items = listOf(Screen.Home, Screen.Transmitter, Screen.Scanner, Screen.Settings)
 
     Scaffold(
         bottomBar = {
@@ -62,16 +65,28 @@ fun AppNavigation() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Home.route) {
-                HomeScreen(onNavigateToScanner = {
-                    navController.navigate(Screen.Scanner.route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+                HomeScreen(
+                    onNavigateToScanner = {
+                        navController.navigate(Screen.Scanner.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                        launchSingleTop = true
-                        restoreState = true
+                    },
+                    onNavigateToTransmitter = {
+                        navController.navigate(Screen.Transmitter.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
-                })
+                )
             }
+            composable(Screen.Transmitter.route) { TransmitterScreen() }
             composable(Screen.Scanner.route) { ScannerScreen() }
             composable(Screen.Settings.route) { SettingsScreen() }
         }

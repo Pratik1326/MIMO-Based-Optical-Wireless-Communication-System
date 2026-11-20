@@ -60,9 +60,12 @@ fun CameraManager(
         )
     }
 
-    // Reactively push mode state changes down to the analyzer
-    LaunchedEffect(analyzerMode) {
+    // Reactively push mode state changes and handle clean session resets
+    LaunchedEffect(analyzerMode, sessionTotalPackets) {
         analyzer.setMode(analyzerMode)
+        if (analyzerMode == FrameAnalyzer.AnalyzerMode.SCANNING_QR && (sessionTotalPackets == null || sessionTotalPackets == 0)) {
+            analyzer.resetSession()
+        }
     }
 
     // Reactively initialize the SequenceManager once metadata is scanned

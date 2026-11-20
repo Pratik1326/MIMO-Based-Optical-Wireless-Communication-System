@@ -29,8 +29,8 @@ class PacketAssembler {
         for ((chIdx, chBits) in channels.withIndex()) {
             if (chBits.size < (ProtocolConstants.HEADER_SIZE_BYTES * 8)) continue
 
-            // Each quadrant has packet starting at bit 0. Allow minor optical jitter search window up to 32 bits.
-            val maxScan = (chBits.size - (ProtocolConstants.HEADER_SIZE_BYTES * 8)).coerceAtMost(32)
+            // Each quadrant has packet starting at bit 0. Allow optical jitter search window up to 96 bits (allows multi-row recovery in 2x2 and 4x4).
+            val maxScan = (chBits.size - (ProtocolConstants.HEADER_SIZE_BYTES * 8)).coerceAtMost(96)
 
             for (bitIdx in 0..maxScan) {
                 if (bitIdx + 16 > chBits.size) break

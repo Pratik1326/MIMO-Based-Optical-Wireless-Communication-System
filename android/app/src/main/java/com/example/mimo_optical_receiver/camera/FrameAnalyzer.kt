@@ -27,6 +27,7 @@ class FrameAnalyzer(
     private var lastFpsTimestamp = System.currentTimeMillis()
     private var lastUniquePacketFrame = 0
     private var lastNackTimestamp = 0L
+    private var qrLockedFrames = 0
     
     // Decoupled sub-systems
     private val qrMetadataParser = QrMetadataParser()
@@ -52,6 +53,18 @@ class FrameAnalyzer(
         sequenceManager = SequenceManager(totalPackets, packetSize)
         activePacketSize = packetSize
         activeMimoMode = mimoMode
+    }
+
+    fun resetSession() {
+        sequenceManager = null
+        activePacketSize = 64
+        activeMimoMode = "1x1"
+        qrLockedFrames = 0
+        frameCount = 0
+        lastUniquePacketFrame = 0
+        currentMode = AnalyzerMode.SCANNING_QR
+        syncDetector.release()
+        screenDetector.resetTracking()
     }
 
     override fun analyze(image: ImageProxy) {
@@ -125,11 +138,22 @@ class FrameAnalyzer(
                 }
                 
                 val isLocked = warpedMat != null
+                if (isLocked && sequenceManager != null) {
+                    qrLockedFrames++
+                    if (qrLockedFrames >= 10) {
+                        currentMode = AnalyzerMode.DECODING_DATA
+                    }
+                } else if (!isLocked) {
+                    qrLockedFrames = 0
+                }
+
                 val statusMsg = when {
-                    sequenceManager != null -> "METADATA SYNCED (${sequenceManager?.packetSize}B ${activeMimoMode})"
+                    sequenceManager != null && isLocked -> "METADATA SYNCED • STARTING..."
+                    sequenceManager != null && !isLocked -> "METADATA SYNCED! Step back to fit screen (${detectionResult.markerCount}/4)"
                     detectionResult.isObstructed -> "⚠️ VIEW OBSTRUCTED: ${detectionResult.obstructionReason ?: "Clear camera path"}"
                     isLocked -> "SCREEN LOCKED • SCANNING QR..."
-                    else -> "ALIGN ARUCO (${detectionResult.markerCount}/4)"
+                    detectionResult.markerCount in 1..3 -> "MOVE BACK: Fit all 4 screen corners (${detectionResult.markerCount}/4)"
+                    else -> "POINT CAMERA AT SCREEN (0/4)"
                 }
                 
                 onStatusUpdated(
@@ -160,8 +184,8 @@ class FrameAnalyzer(
                 val (isNew, confidence) = syncDetector.isNewFrame(warpedMat!!)
                 val needsMorePackets = sequenceManager?.isComplete() == false
 
-                // DECODE: Decode whenever link is locked and frame is not mid-tear (confidence >= 30)
-                if (needsMorePackets && confidence >= 30) {
+                // DECODE: Continuously decode while packets are needed and screen tracking confidence is maintained
+                if (needsMorePackets && confidence >= 20) {
                     channelMats = regionDetector.extractChannels(warpedMat!!, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channelMats, activePacketSize)
                     currentIntensities = decodeResult.intensities

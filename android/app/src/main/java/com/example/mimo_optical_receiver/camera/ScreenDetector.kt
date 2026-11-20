@@ -3,6 +3,7 @@ package com.example.mimo_optical_receiver.camera
 import org.opencv.aruco.Aruco
 import org.opencv.aruco.DetectorParameters
 import org.opencv.aruco.Dictionary
+import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
 import org.opencv.video.Video
@@ -24,14 +25,14 @@ class ScreenDetector {
 
     fun detect(grayMat: Mat): ScreenDetectionResult {
         val totalFrameArea = grayMat.cols().toDouble() * grayMat.rows().toDouble()
-        val minRequiredArea = totalFrameArea * 0.10 // 10% minimum frame area
+        val minRequiredArea = totalFrameArea * 0.035 // 3.5% minimum frame area (allows 40-75cm comfortable range)
 
         // 1. OPTICAL FLOW TRACKING (60 FPS Fast Path)
         if (isTracking && prevGrayMat != null && prevCornersMat != null) {
             trackingFrameCount++
             
-            // Re-validate against ArUco / Contours every 5 frames (~100ms) to prevent hand-tremor drift
-            if (trackingFrameCount > 5) {
+            // Re-validate against ArUco / Contours every 15 frames (~0.5s) to maintain smooth tracking without drift
+            if (trackingFrameCount > 15) {
                 resetTracking()
             } else {
                 val nextCornersMat = MatOfPoint2f()
@@ -97,9 +98,13 @@ class ScreenDetector {
             val parameters = DetectorParameters.create().apply {
                 set_adaptiveThreshWinSizeMin(3)
                 set_adaptiveThreshWinSizeMax(55)
-                set_adaptiveThreshWinSizeStep(8)
+                set_adaptiveThreshWinSizeStep(4)
                 set_adaptiveThreshConstant(7.0)
-                set_polygonalApproxAccuracyRate(0.05)
+                set_polygonalApproxAccuracyRate(0.04)
+                set_errorCorrectionRate(0.6)
+                set_minMarkerPerimeterRate(0.01)
+                set_perspectiveRemovePixelPerCell(6)
+                set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
             }
 
             Aruco.detectMarkers(grayMat, arucoDict, corners, ids, parameters)
@@ -140,15 +145,28 @@ class ScreenDetector {
                     var dataBR: Point? = parsedMarkers[2]?.second?.get(0) // Marker 2 (BR) -> Inner TL corner
                     var dataBL: Point? = parsedMarkers[3]?.second?.get(1) // Marker 3 (BL) -> Inner TR corner
 
-                    // GLARE RECOVERY: Reconstruct missing 4th inner corner geometrically if 3 are seen
+                    // Collect all 12+ corner correspondences across visible markers for well-conditioned RANSAC Homography
+                    val allIdeals = mutableListOf<Point>()
+                    val allObserved = mutableListOf<Point>()
+                    for ((id, pair) in parsedMarkers) {
+                        val ideals = MARKER_IDEAL_CORNERS[id] ?: continue
+                        allIdeals.addAll(ideals)
+                        allObserved.addAll(pair.second)
+                    }
+
+                    // GLARE RECOVERY: Reconstruct missing 4th inner corner using exact Perspective Homography
                     if (dataTL == null && dataTR != null && dataBR != null && dataBL != null) {
-                        dataTL = Point(dataTR.x + dataBL.x - dataBR.x, dataTR.y + dataBL.y - dataBR.y)
+                        dataTL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[0]!!)
+                            ?: Point(dataTR.x + dataBL.x - dataBR.x, dataTR.y + dataBL.y - dataBR.y)
                     } else if (dataTR == null && dataTL != null && dataBR != null && dataBL != null) {
-                        dataTR = Point(dataTL.x + dataBR.x - dataBL.x, dataTL.y + dataBR.y - dataBL.y)
+                        dataTR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[1]!!)
+                            ?: Point(dataTL.x + dataBR.x - dataBL.x, dataTL.y + dataBR.y - dataBL.y)
                     } else if (dataBL == null && dataTL != null && dataTR != null && dataBR != null) {
-                        dataBL = Point(dataTL.x + dataBR.x - dataTR.x, dataTL.y + dataBR.y - dataTR.y)
+                        dataBL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[3]!!)
+                            ?: Point(dataTL.x + dataBR.x - dataTR.x, dataTL.y + dataBR.y - dataTR.y)
                     } else if (dataBR == null && dataTL != null && dataTR != null && dataBL != null) {
-                        dataBR = Point(dataTR.x + dataBL.x - dataTL.x, dataTR.y + dataBL.y - dataTL.y)
+                        dataBR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[2]!!)
+                            ?: Point(dataTR.x + dataBL.x - dataTL.x, dataTR.y + dataBL.y - dataTL.y)
                     }
 
                     if (dataTL != null && dataTR != null && dataBR != null && dataBL != null) {
@@ -169,14 +187,6 @@ class ScreenDetector {
                         }
                     }
                 }
-            } else if (ids.rows() in 1..2) {
-                val detected = ids.rows()
-                return ScreenDetectionResult(
-                    markerCount = detected,
-                    screenCorners = emptyList(),
-                    isObstructed = true,
-                    obstructionReason = "Screen obstructed: Only $detected/4 corner anchors visible. Clear camera view."
-                )
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -267,6 +277,57 @@ class ScreenDetector {
                 c.release()
             }
             contours.clear()
+        }
+    }
+
+    companion object {
+        private val MARKER_IDEAL_CORNERS = mapOf(
+            0 to listOf(Point(6.0, 6.0), Point(50.0, 6.0), Point(50.0, 50.0), Point(6.0, 50.0)),
+            1 to listOf(Point(750.0, 6.0), Point(794.0, 6.0), Point(794.0, 50.0), Point(750.0, 50.0)),
+            2 to listOf(Point(750.0, 750.0), Point(794.0, 750.0), Point(794.0, 794.0), Point(750.0, 794.0)),
+            3 to listOf(Point(6.0, 750.0), Point(50.0, 750.0), Point(50.0, 794.0), Point(6.0, 794.0))
+        )
+
+        private val INNER_CORNER_TARGETS = mapOf(
+            0 to Point(50.0, 50.0),
+            1 to Point(750.0, 50.0),
+            2 to Point(750.0, 750.0),
+            3 to Point(50.0, 750.0)
+        )
+    }
+
+    private fun projectMissingCorner(
+        idealPoints: List<Point>,
+        observedPoints: List<Point>,
+        targetIdeal: Point
+    ): Point? {
+        if (idealPoints.size < 4 || observedPoints.size < 4) return null
+        var srcMat: MatOfPoint2f? = null
+        var dstMat: MatOfPoint2f? = null
+        var transformMat: Mat? = null
+        var targetMat: MatOfPoint2f? = null
+        var projectedMat: MatOfPoint2f? = null
+        return try {
+            srcMat = MatOfPoint2f(*idealPoints.toTypedArray())
+            dstMat = MatOfPoint2f(*observedPoints.toTypedArray())
+            transformMat = Calib3d.findHomography(srcMat, dstMat, Calib3d.RANSAC, 3.0)
+
+            if (transformMat != null && !transformMat.empty()) {
+                targetMat = MatOfPoint2f(targetIdeal)
+                projectedMat = MatOfPoint2f()
+                Core.perspectiveTransform(targetMat, projectedMat, transformMat)
+
+                val result = projectedMat.toList()
+                if (result.isNotEmpty()) result[0] else null
+            } else null
+        } catch (e: Exception) {
+            null
+        } finally {
+            srcMat?.release()
+            dstMat?.release()
+            transformMat?.release()
+            targetMat?.release()
+            projectedMat?.release()
         }
     }
 

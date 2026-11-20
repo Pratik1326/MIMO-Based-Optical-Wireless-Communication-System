@@ -9,6 +9,13 @@ class OpticalFeedbackController {
     private var cameraControl: CameraControl? = null
     private var isPulsing = false
 
+    /**
+     * Controls whether the optical flash strobe is active.
+     * In Mobile-to-Mobile transfers, this defaults to FALSE to prevent the rear LED torch from
+     * reflecting off the transmitting phone's glass screen and blinding the receiver camera.
+     */
+    var isFeedbackEnabled: Boolean = false
+
     fun attachCameraControl(control: CameraControl?) {
         this.cameraControl = control
         Log.d("OPTICAL_FEEDBACK", "CameraControl attached successfully: " + control)
@@ -37,6 +44,10 @@ class OpticalFeedbackController {
      * followed by two verification pulses (200ms ON / 220ms OFF).
      */
     fun sendCompletionAck() {
+        if (!isFeedbackEnabled) {
+            Log.d("OPTICAL_FEEDBACK", "Flash feedback suppressed (Mobile-to-Mobile link)")
+            return
+        }
         Log.i("OPTICAL_FEEDBACK", "Sending Pattern 3: COMPLETE ACK (Sustained Strobe + Verification)")
         val control = cameraControl ?: run {
             Log.w("OPTICAL_FEEDBACK", "Cannot pulse flash: CameraControl is null")
@@ -72,6 +83,10 @@ class OpticalFeedbackController {
     }
 
     private fun pulse(count: Int, pulseDurationMs: Long, gapDurationMs: Long) {
+        if (!isFeedbackEnabled) {
+            Log.d("OPTICAL_FEEDBACK", "Flash pulse suppressed (Mobile-to-Mobile link)")
+            return
+        }
         val control = cameraControl ?: run {
             Log.w("OPTICAL_FEEDBACK", "Cannot pulse flash: CameraControl is null")
             return

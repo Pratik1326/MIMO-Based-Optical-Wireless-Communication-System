@@ -36,46 +36,23 @@ class QrMetadataParser {
         if (secondaryMat != null && !secondaryMat.empty()) {
             val res = decodeMatZxing(secondaryMat)
             if (res != null) return parseJsonMetadata(res)
-        }
 
-        // 1b. Tier 1b: ZXing on central inset of warped matrix (isolates QR card and eliminates peripheral edge artifacts)
-        if (secondaryMat != null && !secondaryMat.empty()) {
-            val insetW = (secondaryMat.cols() * 0.06).toInt()
-            val insetH = (secondaryMat.rows() * 0.06).toInt()
+            // 1b. Tier 1b: ZXing on central inset of warped matrix (isolates QR card and eliminates peripheral edge artifacts)
+            val insetW = (secondaryMat.cols() * 0.08).toInt()
+            val insetH = (secondaryMat.rows() * 0.08).toInt()
             val innerW = secondaryMat.cols() - insetW * 2
             val innerH = secondaryMat.rows() - insetH * 2
             if (innerW > 100 && innerH > 100) {
                 val centerSub = secondaryMat.submat(org.opencv.core.Rect(insetW, insetH, innerW, innerH))
                 try {
-                    val res = decodeMatZxing(centerSub)
-                    if (res != null) return parseJsonMetadata(res)
+                    val subRes = decodeMatZxing(centerSub)
+                    if (subRes != null) return parseJsonMetadata(subRes)
                 } finally {
                     centerSub.release()
                 }
             }
-        }
 
-        // 2. Tier 2: ZXing on raw camera frame
-        if (!primaryMat.empty()) {
-            val res = decodeMatZxing(primaryMat)
-            if (res != null) return parseJsonMetadata(res)
-        }
-
-        // 3. Tier 3: ZXing on Otsu-thresholded warped matrix (cuts through glare / backlight bleed)
-        if (secondaryMat != null && !secondaryMat.empty()) {
-            val otsuWarped = Mat()
-            try {
-                Imgproc.threshold(secondaryMat, otsuWarped, 0.0, 255.0, Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
-                val res = decodeMatZxing(otsuWarped)
-                if (res != null) return parseJsonMetadata(res)
-            } catch (_: Exception) {
-            } finally {
-                otsuWarped.release()
-            }
-        }
-
-        // 4. Tier 4: OpenCV QRCodeDetector fallback on warped matrix
-        if (secondaryMat != null && !secondaryMat.empty()) {
+            // 1c. Tier 1c: OpenCV QRCodeDetector fallback on warped matrix
             try {
                 val cvDecoded = qrDetector.detectAndDecode(secondaryMat)
                 if (!cvDecoded.isNullOrEmpty()) {
@@ -85,8 +62,30 @@ class QrMetadataParser {
             } catch (_: Exception) {}
         }
 
-        // 5. Tier 5: OpenCV QRCodeDetector fallback on primary frame
+        // 2. High-speed Center Viewfinder Crop on primary camera frame (<15ms fast path)
         if (!primaryMat.empty()) {
+            val pW = primaryMat.cols()
+            val pH = primaryMat.rows()
+            val cropW = (pW * 0.70).toInt()
+            val cropH = (pH * 0.70).toInt()
+            val cropX = (pW - cropW) / 2
+            val cropY = (pH - cropH) / 2
+
+            if (cropW > 100 && cropH > 100) {
+                val centerCrop = primaryMat.submat(org.opencv.core.Rect(cropX, cropY, cropW, cropH))
+                try {
+                    val res = decodeMatZxing(centerCrop)
+                    if (res != null) return parseJsonMetadata(res)
+                } finally {
+                    centerCrop.release()
+                }
+            }
+
+            // 3. Full primary frame ZXing fallback
+            val res = decodeMatZxing(primaryMat)
+            if (res != null) return parseJsonMetadata(res)
+
+            // 4. OpenCV QRCodeDetector fallback on primary frame
             try {
                 val cvDecoded = qrDetector.detectAndDecode(primaryMat)
                 if (!cvDecoded.isNullOrEmpty()) {
@@ -110,14 +109,33 @@ class QrMetadataParser {
             val source = PlanarYUVLuminanceSource(
                 buffer, width, height, 0, 0, width, height, false
             )
-            val bitmap = BinaryBitmap(HybridBinarizer(source))
+
             synchronized(zxingReader) {
+                // 1. Try HybridBinarizer
                 try {
-                    zxingReader.decodeWithState(bitmap).text
-                } finally {
+                    val hybridBitmap = BinaryBitmap(HybridBinarizer(source))
+                    return zxingReader.decodeWithState(hybridBitmap).text
+                } catch (_: Exception) {
+                    zxingReader.reset()
+                }
+
+                // 2. Fallback to GlobalHistogramBinarizer (superior for screens under ambient reflections)
+                try {
+                    val globalBitmap = BinaryBitmap(com.google.zxing.common.GlobalHistogramBinarizer(source))
+                    return zxingReader.decodeWithState(globalBitmap).text
+                } catch (_: Exception) {
+                    zxingReader.reset()
+                }
+
+                // 3. Fallback to Inverted Luminance
+                try {
+                    val invertedBitmap = BinaryBitmap(HybridBinarizer(source.invert()))
+                    return zxingReader.decodeWithState(invertedBitmap).text
+                } catch (_: Exception) {
                     zxingReader.reset()
                 }
             }
+            null
         } catch (_: Exception) {
             null
         }

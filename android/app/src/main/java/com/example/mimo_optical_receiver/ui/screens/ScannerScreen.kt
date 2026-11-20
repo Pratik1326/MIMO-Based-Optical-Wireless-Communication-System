@@ -69,6 +69,9 @@ fun ScannerScreen() {
     var analyzerMode by remember { mutableStateOf(FrameAnalyzer.AnalyzerMode.SCANNING_QR) }
     var lastSavedRecord by remember { mutableStateOf<TransferRecord?>(null) }
     var showDiagnosticsSheet by remember { mutableStateOf(false) }
+    var lastValidCount by remember { mutableIntStateOf(0) }
+    var receptionStartTime by remember { mutableLongStateOf(0L) }
+    var lastPacketTimestamp by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(hasCameraPermission) {
         if (!hasCameraPermission) {
@@ -84,6 +87,16 @@ fun ScannerScreen() {
     DisposableEffect(Unit) {
         onDispose {
             feedbackController.release()
+        }
+    }
+
+    // Hands-free Auto-Start: Automatically transition from QR_SCANNING to DECODING_DATA
+    LaunchedEffect(uiState.qrSessionId) {
+        if (uiState.qrSessionId != null && analyzerMode == FrameAnalyzer.AnalyzerMode.SCANNING_QR) {
+            DiagnosticLogger.log("ACTION", "Auto-transitioning to DECODING_DATA mode hands-free.")
+            analyzerMode = FrameAnalyzer.AnalyzerMode.DECODING_DATA
+            uiState = uiState.copy(currentState = "RECEIVING_DATA")
+            feedbackController.sendReadySignal()
         }
     }
 
@@ -189,8 +202,9 @@ fun ScannerScreen() {
                             qrPacketSize = metadata.packet_size,
                             qrMimoMode = metadata.mimo_mode,
                             qrStatus = "Scanned",
-                            currentState = "READY"
+                            currentState = "RECEIVING_DATA"
                         )
+                        analyzerMode = FrameAnalyzer.AnalyzerMode.DECODING_DATA
                     }
                 },
                 onTransferComplete = { bytes ->
@@ -238,7 +252,37 @@ fun ScannerScreen() {
                             ?: "Camera view blocked. Please remove object in front of screen."
                     } else null
 
+                    val now = System.currentTimeMillis()
+                    if (validCount > lastValidCount) {
+                        if (receptionStartTime == 0L) {
+                            receptionStartTime = now
+                        }
+                        lastPacketTimestamp = now
+                        lastValidCount = validCount
+                    }
+
+                    val elapsedSec = (now - receptionStartTime) / 1000.0
+                    val packetSize = uiState.qrPacketSize.takeIf { it > 0 } ?: 64
+                    val throughput = if (validCount > 0 && elapsedSec > 0.5) {
+                        ((validCount * packetSize) / 1024.0) / elapsedSec
+                    } else 0.0
+
+                    val isStalled = (uiState.currentState == "RECEIVING_DATA" || uiState.currentState == "STALLED") &&
+                            validCount > 0 &&
+                            validCount < uiState.qrTotalPackets &&
+                            (now - lastPacketTimestamp > 3500L)
+
+                    val nextState = when {
+                        uiState.currentState == "TRANSFER_COMPLETE" -> "TRANSFER_COMPLETE"
+                        uiState.currentState == "PAUSED" -> "PAUSED"
+                        isStalled -> "STALLED"
+                        analyzerMode == FrameAnalyzer.AnalyzerMode.DECODING_DATA || uiState.qrSessionId != null -> "RECEIVING_DATA"
+                        locked -> "LOCKED"
+                        else -> "WAITING_FOR_QR"
+                    }
+
                     uiState = uiState.copy(
+                        currentState = nextState,
                         isPerspectiveLocked = locked,
                         arucoMarkersDetected = markers,
                         syncConfidenceScore = confidence,
@@ -246,6 +290,7 @@ fun ScannerScreen() {
                         duplicatePackets = duplicateCount,
                         crcFailedPackets = crcFailed,
                         transferProgress = progress,
+                        throughputKbs = throughput,
                         screenBounds = bounds,
                         channelIntensities = intensities,
                         isObstructed = isObstructed,
@@ -299,7 +344,7 @@ fun ScannerScreen() {
                 onStart = {
                     DiagnosticLogger.log("ACTION", "START clicked. Switching to DECODING_DATA mode.")
                     analyzerMode = FrameAnalyzer.AnalyzerMode.DECODING_DATA
-                    uiState = uiState.copy(currentState = "RECEIVING_DATA")
+                    uiState = uiState.copy(currentState = if (uiState.validPacketsReceived > 0) "RECEIVING_DATA" else "WAITING_FOR_DATA")
                     // Optical Ready Signal: 1 flash pulse to PC
                     feedbackController.sendReadySignal()
                 },
@@ -311,6 +356,9 @@ fun ScannerScreen() {
                     DiagnosticLogger.clear()
                     analyzerMode = FrameAnalyzer.AnalyzerMode.SCANNING_QR
                     lastSavedRecord = null
+                    lastValidCount = 0
+                    receptionStartTime = 0L
+                    lastPacketTimestamp = 0L
                     uiState = uiState.copy(
                         qrSessionId = null,
                         qrFilename = null,
@@ -318,6 +366,7 @@ fun ScannerScreen() {
                         qrStatus = "Pending",
                         currentState = "WAITING_FOR_QR",
                         validPacketsReceived = 0,
+                        throughputKbs = 0.0,
                         transferProgress = 0f
                     )
                 },
@@ -385,7 +434,8 @@ fun ModernScannerOverlay(
                         val statusDotColor = when {
                             uiState.isObstructed -> Color(0xFFEF4444)
                             uiState.currentState == "TRANSFER_COMPLETE" -> Color(0xFF00E676)
-                            uiState.currentState == "RECEIVING_DATA" -> Color(0xFF29B6F6)
+                            uiState.currentState == "RECEIVING_DATA" -> Color(0xFF00E676)
+                            uiState.currentState == "STALLED" -> Color(0xFFFFB300)
                             uiState.qrSessionId != null -> Color(0xFF00E676)
                             uiState.isPerspectiveLocked -> Color(0xFFFFB300)
                             else -> Color.White.copy(alpha = 0.6f)
@@ -403,10 +453,11 @@ fun ModernScannerOverlay(
                             uiState.isObstructed -> "Obstruction Detected"
                             uiState.currentState == "TRANSFER_COMPLETE" -> "Transfer Complete"
                             uiState.currentState == "RECEIVING_DATA" -> "Receiving Data • ${uiState.qrMimoMode ?: "1x1"}"
-                            uiState.qrSessionId != null -> "QR Handshake Synced • Ready"
+                            uiState.currentState == "STALLED" -> "Stream Stalled • Re-align Camera"
+                            uiState.qrSessionId != null -> "Receiving Data • ${uiState.qrMimoMode ?: "1x1"}"
                             uiState.isPerspectiveLocked -> "Screen Locked • Scanning QR..."
                             uiState.arucoMarkersDetected > 0 -> "Aligning ArUco (${uiState.arucoMarkersDetected}/4)"
-                            else -> "Point Camera at PC Screen"
+                            else -> "Point Camera at Screen"
                         }
 
                         Text(
@@ -602,18 +653,52 @@ fun ModernScannerOverlay(
                         }
                     }
                 }
-                uiState.qrSessionId != null -> {
-                    Button(
-                        onClick = onStart,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF29B6F6))
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("START RECEIVING (${uiState.qrFilename ?: "FILE"})", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 15.sp)
+                uiState.currentState == "STALLED" -> {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFB300).copy(alpha = 0.25f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFFFB300))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("Optical Stream Stalled", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                    Text("No new packets for >3s. Ensure camera is aligned with screen.", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onPause,
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.Pause, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pause")
+                            }
+
+                            Button(
+                                onClick = onReset,
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry / Rescan", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
                 else -> {
