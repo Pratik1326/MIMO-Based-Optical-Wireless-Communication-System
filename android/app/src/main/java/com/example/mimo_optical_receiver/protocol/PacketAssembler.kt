@@ -30,8 +30,8 @@ class PacketAssembler {
         for ((chIdx, chBits) in channels.withIndex()) {
             if (chBits.size < (ProtocolConstants.HEADER_SIZE_BYTES * 8)) continue
 
-            // Allow jitter search window up to 96 bits (allows multi-row recovery in 2x2 and 4x4).
-            val maxScan = (chBits.size - (ProtocolConstants.HEADER_SIZE_BYTES * 8)).coerceAtMost(96)
+            // Strict sync window: search up to 8 bits to catch sub-byte alignment jitter
+            val maxScan = (chBits.size - (ProtocolConstants.HEADER_SIZE_BYTES * 8)).coerceAtMost(8)
 
             for (bitIdx in 0..maxScan) {
                 if (bitIdx + 16 > chBits.size) break
@@ -45,19 +45,29 @@ class PacketAssembler {
                 // Compute Hamming distance against magic header 0x4D4F
                 val hamming = Integer.bitCount(window16 xor magic16)
 
-                // Allow up to 2 bit flips in the 16-bit sync word (e.g. 0xDD4F vs 0x4D4F)
-                if (hamming <= 2) {
+                // Allow up to 2 bit flips ONLY at exact cell alignment (bitIdx == 0); require exact match for shifted offsets
+                val isPreambleMatch = if (bitIdx == 0) hamming <= 2 else hamming == 0
+
+                if (isPreambleMatch) {
                     anyMagicFound = true
                     if (firstOffset == -1) firstOffset = bitIdx
 
                     // Extract 11-byte header candidate
                     val headerBytes = extractBytes(chBits, bitIdx, ProtocolConstants.HEADER_SIZE_BYTES)
+
+                    // Strict header structural verification to discard noise false-positives
+                    val version = headerBytes[2].toInt() and 0xFF
+                    val frameType = headerBytes[3].toInt() and 0xFF
+                    val channelId = headerBytes[4].toInt() and 0xFF
                     val b1 = headerBytes[9].toInt() and 0xFF
                     val b2 = headerBytes[10].toInt() and 0xFF
                     val payloadLength = (b1 shl 8) or b2
 
-                    // Discard noise candidates where payload length exceeds valid optical bounds [1..expectedPacketSize]
-                    if (payloadLength <= 0 || payloadLength > expectedPacketSize) {
+                    // Discard if structural fields violate protocol constraints
+                    if (version != ProtocolConstants.PROTOCOL_VERSION.toInt() ||
+                        frameType !in 1..4 ||
+                        channelId !in 0..15 ||
+                        payloadLength <= 0 || payloadLength > expectedPacketSize) {
                         continue
                     }
 

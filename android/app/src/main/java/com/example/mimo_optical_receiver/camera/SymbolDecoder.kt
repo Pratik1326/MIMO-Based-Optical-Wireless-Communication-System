@@ -56,10 +56,10 @@ class SymbolDecoder {
             val cellWidth = width / gridSide.toDouble()
             val cellHeight = height / gridSide.toDouble()
 
-            // High-precision center-cell core sampling: 28% guard inset on all 4 sides of each cell
-            // (eliminates optical blur and subpixel transition bleeding from neighboring cells)
-            val insetX = cellWidth * 0.28
-            val insetY = cellHeight * 0.28
+            // High-precision center-cell core sampling: 35% guard inset on all 4 sides of each cell
+            // Samples the tight central 30% core to eliminate optical blur, tilt skew, and neighboring cell bleed
+            val insetX = cellWidth * 0.35
+            val insetY = cellHeight * 0.35
 
             var sampleMin = 255.0
             var sampleMax = 0.0
@@ -91,8 +91,17 @@ class SymbolDecoder {
                 }
             }
 
+            // CONTRAST GUARDRAIL: Reject frames with collapsed dynamic range (< 45.0) to prevent all-0/all-1 noise
+            if ((sampleMax - sampleMin) < 45.0) {
+                return DecodeOutput(emptyList(), ByteArray(0), emptyList())
+            }
+
             // High-precision 2-Means dynamic cluster thresholding
             val localThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax)
+            if (localThreshold < 0.0) {
+                // Insufficient bimodal contrast (< 30.0 separation between black and white clusters)
+                return DecodeOutput(emptyList(), ByteArray(0), emptyList())
+            }
             if (chIndex == 0) {
                 lastMin = sampleMin
                 lastMax = sampleMax
@@ -125,8 +134,8 @@ class SymbolDecoder {
      * Converges in 3-5 iterations and is immune to LCD backlight falloff and glare outliers.
      */
     private fun compute2MeansThreshold(values: DoubleArray, minVal: Double, maxVal: Double): Double {
-        if (maxVal - minVal < 15.0 || values.isEmpty()) {
-            return (minVal + maxVal) / 2.0
+        if (maxVal - minVal < 45.0 || values.isEmpty()) {
+            return -1.0
         }
 
         // Initialize centers near bottom 25% and top 75%
@@ -159,6 +168,11 @@ class SymbolDecoder {
             }
             c0 = newC0
             c1 = newC1
+        }
+
+        val clusterSeparation = c1 - c0
+        if (clusterSeparation < 30.0) {
+            return -1.0 // Bimodal distribution separation insufficient for reliable symbol recovery
         }
 
         return (c0 + c1) / 2.0

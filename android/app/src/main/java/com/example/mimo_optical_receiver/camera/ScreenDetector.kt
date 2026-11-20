@@ -27,68 +27,8 @@ class ScreenDetector {
         val totalFrameArea = grayMat.cols().toDouble() * grayMat.rows().toDouble()
         val minRequiredArea = totalFrameArea * 0.035 // 3.5% minimum frame area (allows 40-75cm comfortable range)
 
-        // 1. OPTICAL FLOW TRACKING (60 FPS Fast Path)
-        if (isTracking && prevGrayMat != null && prevCornersMat != null) {
-            trackingFrameCount++
-            
-            // Re-validate against ArUco / Contours every 15 frames (~0.5s) to maintain smooth tracking without drift
-            if (trackingFrameCount > 15) {
-                resetTracking()
-            } else {
-                val nextCornersMat = MatOfPoint2f()
-                val status = MatOfByte()
-                val err = MatOfFloat()
-
-                try {
-                    val winSize = Size(31.0, 31.0)
-                    val maxLevel = 3
-                    val criteria = TermCriteria(TermCriteria.EPS or TermCriteria.COUNT, 20, 0.03)
-
-                    Video.calcOpticalFlowPyrLK(
-                        prevGrayMat!!,
-                        grayMat,
-                        prevCornersMat!!,
-                        nextCornersMat,
-                        status,
-                        err,
-                        winSize,
-                        maxLevel,
-                        criteria
-                    )
-
-                    val statusArray = status.toArray()
-                    val allTracked = statusArray.size == 4 && statusArray.all { it.toInt() == 1 }
-
-                    if (allTracked) {
-                        val trackedPoints = nextCornersMat.toList()
-                        val currentArea = calculatePolygonArea(trackedPoints)
-
-                        // GUARDRAIL: If tracked box shrinks below 10% frame area, force reset
-                        if (currentArea >= minRequiredArea) {
-                            prevCornersMat?.release()
-                            prevCornersMat = nextCornersMat
-
-                            prevGrayMat?.release()
-                            prevGrayMat = grayMat.clone()
-
-                            return ScreenDetectionResult(4, trackedPoints)
-                        } else {
-                            resetTracking()
-                        }
-                    } else {
-                        resetTracking()
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    resetTracking()
-                } finally {
-                    status.release()
-                    err.release()
-                }
-            }
-        }
-
-        // 2. PRIMARY STRATEGY: ARUCO ANCHOR DETECTION (IDs 0, 1, 2, 3 with Expanded Window)
+        // 1. PRIMARY STRATEGY: DIRECT ARUCO ANCHOR DETECTION (Subpixel Precision, Zero Drift)
+        // Evaluates every frame against ArUco markers (0, 1, 2, 3) to prevent cumulative optical flow drift
         var ids: Mat? = null
         val corners = ArrayList<Mat>()
 
@@ -146,10 +86,10 @@ class ScreenDetector {
                         allObserved.addAll(pair.second)
                     }
 
-                    // 1. Primary: Project 4 outer screen corners (TL, TR, BR, BL) via RANSAC Homography
+                    // Project 4 outer screen corners (TL, TR, BR, BL) via RANSAC Homography
                     var outerCorners: List<Point>? = projectOuterScreenCorners(allIdeals, allObserved)
 
-                    // 2. Fallback: 2-Marker similarity transform if homography fails
+                    // Fallback: 2-Marker similarity transform if homography fails
                     if (outerCorners == null && parsedMarkers.size >= 2) {
                         val markerList = parsedMarkers.toList()
                         val (idA, pairA) = markerList[0]
@@ -215,7 +155,66 @@ class ScreenDetector {
             corners.clear()
         }
 
-        // 3. SECONDARY STRATEGY: OUTER CONTOUR WITH SYMMETRY SANITIZATION
+        // 2. SECONDARY FALLBACK: OPTICAL FLOW TRACKING (Bridge short momentary 1-5 frame occlusions/shakes)
+        if (isTracking && prevGrayMat != null && prevCornersMat != null) {
+            trackingFrameCount++
+
+            if (trackingFrameCount > 5) {
+                resetTracking()
+            } else {
+                val nextCornersMat = MatOfPoint2f()
+                val status = MatOfByte()
+                val err = MatOfFloat()
+
+                try {
+                    val winSize = Size(31.0, 31.0)
+                    val maxLevel = 3
+                    val criteria = TermCriteria(TermCriteria.EPS or TermCriteria.COUNT, 20, 0.03)
+
+                    Video.calcOpticalFlowPyrLK(
+                        prevGrayMat!!,
+                        grayMat,
+                        prevCornersMat!!,
+                        nextCornersMat,
+                        status,
+                        err,
+                        winSize,
+                        maxLevel,
+                        criteria
+                    )
+
+                    val statusArray = status.toArray()
+                    val allTracked = statusArray.size == 4 && statusArray.all { it.toInt() == 1 }
+
+                    if (allTracked) {
+                        val trackedPoints = nextCornersMat.toList()
+                        val currentArea = calculatePolygonArea(trackedPoints)
+
+                        if (currentArea >= minRequiredArea) {
+                            prevCornersMat?.release()
+                            prevCornersMat = nextCornersMat
+
+                            prevGrayMat?.release()
+                            prevGrayMat = grayMat.clone()
+
+                            return ScreenDetectionResult(4, trackedPoints)
+                        } else {
+                            resetTracking()
+                        }
+                    } else {
+                        resetTracking()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    resetTracking()
+                } finally {
+                    status.release()
+                    err.release()
+                }
+            }
+        }
+
+        // 3. TERTIARY FALLBACK: OUTER CONTOUR WITH SYMMETRY SANITIZATION
         val binaryMat = Mat()
         val hierarchy = Mat()
         val contours = ArrayList<MatOfPoint>()

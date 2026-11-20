@@ -133,7 +133,7 @@ fun ScannerScreen() {
                 DiagRow("Valid Packets", "${uiState.validPacketsReceived} / ${uiState.qrTotalPackets}")
                 DiagRow("Duplicate Packets", "${uiState.duplicatePackets}")
                 DiagRow("CRC Mismatches", "${uiState.crcFailedPackets}")
-                DiagRow("Throughput", "${uiState.throughputKbs} KB/s")
+                DiagRow("Throughput", "%.1f KB/s".format(uiState.throughputKbs))
 
                 if (uiState.channelIntensities.isNotEmpty()) {
                     Text("Channel Intensities:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -597,10 +597,10 @@ fun ModernScannerOverlay(
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontSize = 12.sp
                             )
-                            if (uiState.currentState == "RECEIVING_DATA") {
+                            if (uiState.currentState == "RECEIVING_DATA" || uiState.currentState == "STALLED") {
                                 Text(
-                                    text = "${uiState.throughputKbs} KB/s",
-                                    color = Color(0xFF00E676),
+                                    text = "%.1f KB/s".format(uiState.throughputKbs),
+                                    color = if (uiState.currentState == "STALLED") Color(0xFFFFB300) else Color(0xFF00E676),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -709,7 +709,7 @@ fun ModernScannerOverlay(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text("Optical Stream Stalled", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                                    Text("No new packets for >3s. Ensure camera is aligned with screen.", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                                    Text("Waiting for next packet. Keep camera aligned with screen.", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
                                 }
                             }
                         }
@@ -730,14 +730,14 @@ fun ModernScannerOverlay(
                             }
 
                             Button(
-                                onClick = onReset,
+                                onClick = onStart,
                                 modifier = Modifier.weight(1f).height(48.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00B0FF))
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black)
+                                Icon(Icons.Default.Sync, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry / Rescan", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("Re-sync Stream", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

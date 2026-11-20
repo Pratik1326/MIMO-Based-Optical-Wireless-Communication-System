@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import numpy as np
 import qrcode
-from qrcode.constants import ERROR_CORRECT_L
+from qrcode.constants import ERROR_CORRECT_Q
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +71,7 @@ def generate_qr(metadata: QRMetadata, box_size: int = 12, border: int = 4, compa
         raise ValueError("box_size must be positive and border cannot be negative")
     qr = qrcode.QRCode(
         version=None,
-        error_correction=ERROR_CORRECT_L,
+        error_correction=ERROR_CORRECT_Q,
         box_size=box_size,
         border=border,
     )
