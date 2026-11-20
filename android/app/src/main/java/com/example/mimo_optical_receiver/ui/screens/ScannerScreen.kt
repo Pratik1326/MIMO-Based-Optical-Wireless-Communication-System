@@ -633,15 +633,26 @@ fun ModernScannerOverlay(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            val isActivelyDecoding = analyzerMode == FrameAnalyzer.AnalyzerMode.DECODING_DATA
                             Button(
                                 onClick = onStart,
                                 modifier = Modifier.weight(1f).height(50.dp),
                                 shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isActivelyDecoding) Color(0xFF00B0FF) else Color(0xFF00E676)
+                                )
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Icon(
+                                    if (isActivelyDecoding) Icons.Default.Sync else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Start Receiving", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (isActivelyDecoding) "Scanning Stream..." else "Start Receiving",
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             OutlinedButton(
                                 onClick = onReset,

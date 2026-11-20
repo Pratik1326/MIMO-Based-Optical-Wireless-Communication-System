@@ -11,15 +11,15 @@ class PerspectiveCorrector {
     companion object {
         // Physical geometry alignment between PC Transmitter and Android Receiver:
         // PC Transmitter frame: 800x800 px.
-        // ArUco marker size = 44 px, margin = 6 px.
-        // Inner corners of ArUco markers span 50 px to 750 px (width = 700 px).
         // Central data area spans 56 px to 744 px (width = 688 px).
-        // The 6 px quiet margin on each side corresponds to:
-        // 6.0 * (768.0 / 688.0) = 6.697674 px in 768x768 warped space.
-        private const val INNER_MARKER_SPAN = 700.0
+        // Outer screen boundary spans 0 px to 800 px (width = 800 px).
+        // Target warped output size is 768x768 px, which represents 100% of the active data area [56..744].
+        // The outer screen boundary offset on each side corresponds to:
+        // (800.0 - 688.0) / 2.0 * (768.0 / 688.0) = 56.0 * (768.0 / 688.0) = 62.511628 px in 768x768 warped space.
+        private const val BASE_SCREEN_SIZE = 800.0
         private const val DATA_AREA_SPAN = 688.0
         private const val TARGET_WARP_SIZE = 768.0
-        private const val MARGIN_OFFSET = (INNER_MARKER_SPAN - DATA_AREA_SPAN) / 2.0 * (TARGET_WARP_SIZE / DATA_AREA_SPAN)
+        private const val MARGIN_OFFSET = (BASE_SCREEN_SIZE - DATA_AREA_SPAN) / 2.0 * (TARGET_WARP_SIZE / DATA_AREA_SPAN)
     }
 
     fun correct(grayMat: Mat, corners: List<Point>): Mat? {
@@ -31,11 +31,11 @@ class PerspectiveCorrector {
         var warpedMat: Mat? = null
 
         try {
-            // Construct source points array (TL, TR, BR, BL) from detected ArUco marker inner corners
+            // Construct source points array (TL, TR, BR, BL) from detected outer screen corners
             srcPts = MatOfPoint2f(corners[0], corners[1], corners[2], corners[3])
 
-            // Map ArUco inner corners outward by MARGIN_OFFSET (~4.465 px) so that the
-            // 512x512 warped output matrix aligns 100% to the active data grid cells (0 px offset).
+            // Map outer screen corners outward by MARGIN_OFFSET (~62.51 px) so that the
+            // 768x768 warped output matrix aligns 100.0% to the active data grid cells [56..744] (0 px offset).
             dstPts = MatOfPoint2f(
                 Point(-MARGIN_OFFSET, -MARGIN_OFFSET),
                 Point(TARGET_WARP_SIZE + MARGIN_OFFSET, -MARGIN_OFFSET),

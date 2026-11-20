@@ -138,83 +138,61 @@ class ScreenDetector {
                 }
 
                 if (parsedMarkers.size >= 2) {
-                    // INNER CORNERS: Isolate pure 608x608 Central Data Area (0% ArUco marker pixel bleeding)
-                    // Marker corner indexing in OpenCV: 0 = TL, 1 = TR, 2 = BR, 3 = BL
-                    var dataTL: Point? = parsedMarkers[0]?.second?.get(2) // Marker 0 (TL) -> Inner BR corner
-                    var dataTR: Point? = parsedMarkers[1]?.second?.get(3) // Marker 1 (TR) -> Inner BL corner
-                    var dataBR: Point? = parsedMarkers[2]?.second?.get(0) // Marker 2 (BR) -> Inner TL corner
-                    var dataBL: Point? = parsedMarkers[3]?.second?.get(1) // Marker 3 (BL) -> Inner TR corner
+                    val allIdeals = mutableListOf<Point>()
+                    val allObserved = mutableListOf<Point>()
+                    for ((id, pair) in parsedMarkers) {
+                        val ideals = MARKER_IDEAL_CORNERS[id] ?: continue
+                        allIdeals.addAll(ideals)
+                        allObserved.addAll(pair.second)
+                    }
 
-                    if (parsedMarkers.size >= 3) {
-                        // Collect all 12+ corner correspondences across visible markers for well-conditioned RANSAC Homography
-                        val allIdeals = mutableListOf<Point>()
-                        val allObserved = mutableListOf<Point>()
-                        for ((id, pair) in parsedMarkers) {
-                            val ideals = MARKER_IDEAL_CORNERS[id] ?: continue
-                            allIdeals.addAll(ideals)
-                            allObserved.addAll(pair.second)
-                        }
+                    // 1. Primary: Project 4 outer screen corners (TL, TR, BR, BL) via RANSAC Homography
+                    var outerCorners: List<Point>? = projectOuterScreenCorners(allIdeals, allObserved)
 
-                        // GLARE RECOVERY: Reconstruct missing 4th inner corner using exact Perspective Homography
-                        if (dataTL == null && dataTR != null && dataBR != null && dataBL != null) {
-                            dataTL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[0]!!)
-                                ?: Point(dataTR.x + dataBL.x - dataBR.x, dataTR.y + dataBL.y - dataBR.y)
-                        } else if (dataTR == null && dataTL != null && dataBR != null && dataBL != null) {
-                            dataTR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[1]!!)
-                                ?: Point(dataTL.x + dataBR.x - dataBL.x, dataTL.y + dataBR.y - dataBL.y)
-                        } else if (dataBL == null && dataTL != null && dataTR != null && dataBR != null) {
-                            dataBL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[3]!!)
-                                ?: Point(dataTL.x + dataBR.x - dataTR.x, dataTL.y + dataBR.y - dataTR.y)
-                        } else if (dataBR == null && dataTL != null && dataTR != null && dataBL != null) {
-                            dataBR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[2]!!)
-                                ?: Point(dataTR.x + dataBL.x - dataTL.x, dataTR.y + dataBL.y - dataTL.y)
-                        }
-                    } else if (parsedMarkers.size == 2) {
-                        // 2-MARKER GEOMETRIC SYNTHESIS: Square aspect ratio (1:1) defines missing corners
-                        if (dataTL != null && dataTR != null) {
-                            val vx = dataTR.x - dataTL.x
-                            val vy = dataTR.y - dataTL.y
-                            dataBL = Point(dataTL.x - vy, dataTL.y + vx)
-                            dataBR = Point(dataTR.x - vy, dataTR.y + vx)
-                        } else if (dataBL != null && dataBR != null) {
-                            val vx = dataBR.x - dataBL.x
-                            val vy = dataBR.y - dataBL.y
-                            dataTL = Point(dataBL.x + vy, dataBL.y - vx)
-                            dataTR = Point(dataBR.x + vy, dataBR.y - vx)
-                        } else if (dataTL != null && dataBL != null) {
-                            val vx = dataBL.x - dataTL.x
-                            val vy = dataBL.y - dataTL.y
-                            dataTR = Point(dataTL.x - vy, dataTL.y + vx)
-                            dataBR = Point(dataBL.x - vy, dataBL.y + vx)
-                        } else if (dataTR != null && dataBR != null) {
-                            val vx = dataBR.x - dataTR.x
-                            val vy = dataBR.y - dataTR.y
-                            dataTL = Point(dataTR.x + vy, dataTR.y - vx)
-                            dataBL = Point(dataBR.x + vy, dataBR.y - vx)
-                        } else if (dataTL != null && dataBR != null) {
-                            val mx = (dataTL.x + dataBR.x) / 2.0
-                            val my = (dataTL.y + dataBR.y) / 2.0
-                            val dx = (dataBR.x - dataTL.x) / 2.0
-                            val dy = (dataBR.y - dataTL.y) / 2.0
-                            dataTR = Point(mx - dy, my + dx)
-                            dataBL = Point(mx + dy, my - dx)
-                        } else if (dataTR != null && dataBL != null) {
-                            val mx = (dataTR.x + dataBL.x) / 2.0
-                            val my = (dataTR.y + dataBL.y) / 2.0
-                            val dx = (dataBL.x - dataTR.x) / 2.0
-                            val dy = (dataBL.y - dataTR.y) / 2.0
-                            dataBR = Point(mx - dy, my + dx)
-                            dataTL = Point(mx + dy, my - dx)
+                    // 2. Fallback: 2-Marker similarity transform if homography fails
+                    if (outerCorners == null && parsedMarkers.size >= 2) {
+                        val markerList = parsedMarkers.toList()
+                        val (idA, pairA) = markerList[0]
+                        val (idB, pairB) = markerList[1]
+                        val idealA = MARKER_IDEAL_CENTERS[idA]
+                        val idealB = MARKER_IDEAL_CENTERS[idB]
+                        if (idealA != null && idealB != null) {
+                            val cA = pairA.first
+                            val cB = pairB.first
+                            val idealVx = idealB.x - idealA.x
+                            val idealVy = idealB.y - idealA.y
+                            val idealDistSq = idealVx * idealVx + idealVy * idealVy
+
+                            if (idealDistSq > 1e-4) {
+                                val obsVx = cB.x - cA.x
+                                val obsVy = cB.y - cA.y
+                                val cosSin_x = (obsVx * idealVx + obsVy * idealVy) / idealDistSq
+                                val cosSin_y = (obsVy * idealVx - obsVx * idealVy) / idealDistSq
+
+                                fun mapIdeal(ip: Point): Point {
+                                    val dx = ip.x - idealA.x
+                                    val dy = ip.y - idealA.y
+                                    val rx = dx * cosSin_x - dy * cosSin_y
+                                    val ry = dx * cosSin_y + dy * cosSin_x
+                                    return Point(cA.x + rx, cA.y + ry)
+                                }
+
+                                outerCorners = listOf(
+                                    mapIdeal(Point(0.0, 0.0)),
+                                    mapIdeal(Point(800.0, 0.0)),
+                                    mapIdeal(Point(800.0, 800.0)),
+                                    mapIdeal(Point(0.0, 800.0))
+                                )
+                            }
                         }
                     }
 
-                    if (dataTL != null && dataTR != null && dataBR != null && dataBL != null) {
-                        val sortedCorners = listOf(dataTL, dataTR, dataBR, dataBL)
-                        val detectedArea = calculatePolygonArea(sortedCorners)
+                    if (outerCorners != null && outerCorners.size == 4) {
+                        val detectedArea = calculatePolygonArea(outerCorners)
 
                         if (detectedArea >= minRequiredArea) {
                             prevCornersMat?.release()
-                            prevCornersMat = MatOfPoint2f(*sortedCorners.toTypedArray())
+                            prevCornersMat = MatOfPoint2f(*outerCorners.toTypedArray())
 
                             prevGrayMat?.release()
                             prevGrayMat = grayMat.clone()
@@ -222,7 +200,7 @@ class ScreenDetector {
                             isTracking = true
                             trackingFrameCount = 0
 
-                            return ScreenDetectionResult(4, sortedCorners)
+                            return ScreenDetectionResult(parsedMarkers.size, outerCorners)
                         }
                     }
                 }
@@ -327,19 +305,18 @@ class ScreenDetector {
             3 to listOf(Point(6.0, 750.0), Point(50.0, 750.0), Point(50.0, 794.0), Point(6.0, 794.0))
         )
 
-        private val INNER_CORNER_TARGETS = mapOf(
-            0 to Point(50.0, 50.0),
-            1 to Point(750.0, 50.0),
-            2 to Point(750.0, 750.0),
-            3 to Point(50.0, 750.0)
+        private val MARKER_IDEAL_CENTERS = mapOf(
+            0 to Point(28.0, 28.0),
+            1 to Point(772.0, 28.0),
+            2 to Point(772.0, 772.0),
+            3 to Point(28.0, 772.0)
         )
     }
 
-    private fun projectMissingCorner(
+    private fun projectOuterScreenCorners(
         idealPoints: List<Point>,
-        observedPoints: List<Point>,
-        targetIdeal: Point
-    ): Point? {
+        observedPoints: List<Point>
+    ): List<Point>? {
         if (idealPoints.size < 4 || observedPoints.size < 4) return null
         var srcMat: MatOfPoint2f? = null
         var dstMat: MatOfPoint2f? = null
@@ -352,12 +329,18 @@ class ScreenDetector {
             transformMat = Calib3d.findHomography(srcMat, dstMat, Calib3d.RANSAC, 3.0)
 
             if (transformMat != null && !transformMat.empty()) {
-                targetMat = MatOfPoint2f(targetIdeal)
+                val targets = arrayOf(
+                    Point(0.0, 0.0),
+                    Point(800.0, 0.0),
+                    Point(800.0, 800.0),
+                    Point(0.0, 800.0)
+                )
+                targetMat = MatOfPoint2f(*targets)
                 projectedMat = MatOfPoint2f()
                 Core.perspectiveTransform(targetMat, projectedMat, transformMat)
 
                 val result = projectedMat.toList()
-                if (result.isNotEmpty()) result[0] else null
+                if (result.size == 4) result else null
             } else null
         } catch (e: Exception) {
             null
