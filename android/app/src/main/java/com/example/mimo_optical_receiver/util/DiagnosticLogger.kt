@@ -1,4 +1,4 @@
-﻿package com.example.mimo_optical_receiver.util
+package com.example.mimo_optical_receiver.util
 
 import android.content.Context
 import android.os.Environment

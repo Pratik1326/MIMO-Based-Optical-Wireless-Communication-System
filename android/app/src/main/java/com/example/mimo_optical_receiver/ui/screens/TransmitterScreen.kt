@@ -1,6 +1,7 @@
 package com.example.mimo_optical_receiver.ui.screens
 
 import android.app.Activity
+import android.graphics.Rect
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.WindowManager
@@ -159,16 +160,21 @@ fun TransmitterScreen() {
             ) {
                 val bmp = currentBitmap
                 if (bmp != null && !bmp.isRecycled) {
-                    key(stats.currentFrameIndex, stats.carouselCycle, stats.state) {
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "MIMO Optical Stream",
-                            filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val trigger = stats.currentFrameIndex
+                        val cycleTrigger = stats.carouselCycle
+                        drawIntoCanvas { canvas ->
+                            val paint = Paint().asFrameworkPaint().apply {
+                                isFilterBitmap = false
+                                isDither = false
+                            }
+                            val src = Rect(0, 0, bmp.width, bmp.height)
+                            val dst = Rect(0, 0, size.width.toInt(), size.height.toInt())
+                            canvas.nativeCanvas.drawBitmap(bmp, src, dst, paint)
+                        }
                     }
 
-                    // Minimalist top overlay badge
+                    // Minimalist top overlay badge with active transmission beacon
                     Surface(
                         color = Color.Black.copy(alpha = 0.75f),
                         shape = CircleShape,
@@ -176,18 +182,30 @@ fun TransmitterScreen() {
                             .align(Alignment.TopCenter)
                             .padding(top = 10.dp)
                     ) {
-                        Text(
-                            text = when (stats.state) {
-                                TransmissionState.QR_HANDSHAKE -> "PHASE 1: QR HANDSHAKE"
-                                TransmissionState.TRANSMITTING -> "STREAMING: Frame ${stats.currentFrameIndex}/${stats.totalMimoFrames} (Cycle ${stats.carouselCycle})"
-                                TransmissionState.PAUSED -> "PAUSED"
-                                else -> ""
-                            },
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        )
+                        ) {
+                            if (stats.state == TransmissionState.TRANSMITTING) {
+                                Surface(
+                                    color = Color(0xFF00E676),
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(7.dp)
+                                ) {}
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = when (stats.state) {
+                                    TransmissionState.QR_HANDSHAKE -> "PHASE 1: QR HANDSHAKE"
+                                    TransmissionState.TRANSMITTING -> "STREAMING: Frame ${stats.currentFrameIndex}/${stats.totalMimoFrames} (Cycle ${stats.carouselCycle}) • ${stats.targetFps} FPS"
+                                    TransmissionState.PAUSED -> "PAUSED"
+                                    else -> ""
+                                },
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 } else {
                     Column(

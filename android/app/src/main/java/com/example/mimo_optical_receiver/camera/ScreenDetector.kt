@@ -98,10 +98,10 @@ class ScreenDetector {
             val parameters = DetectorParameters.create().apply {
                 set_adaptiveThreshWinSizeMin(3)
                 set_adaptiveThreshWinSizeMax(55)
-                set_adaptiveThreshWinSizeStep(4)
+                set_adaptiveThreshWinSizeStep(6)
                 set_adaptiveThreshConstant(7.0)
                 set_polygonalApproxAccuracyRate(0.04)
-                set_errorCorrectionRate(0.6)
+                set_errorCorrectionRate(0.8)
                 set_minMarkerPerimeterRate(0.01)
                 set_perspectiveRemovePixelPerCell(6)
                 set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
@@ -109,7 +109,7 @@ class ScreenDetector {
 
             Aruco.detectMarkers(grayMat, arucoDict, corners, ids, parameters)
 
-            if (ids.rows() >= 3) {
+            if (ids.rows() >= 2) {
                 val detectedMarkers = mutableMapOf<Int, Mat>()
                 for (i in 0 until ids.rows()) {
                     val markerId = ids.get(i, 0)[0].toInt()
@@ -137,7 +137,7 @@ class ScreenDetector {
                     parsedMarkers[id] = getCenterAndCorners(mat)
                 }
 
-                if (parsedMarkers.size >= 3) {
+                if (parsedMarkers.size >= 2) {
                     // INNER CORNERS: Isolate pure 608x608 Central Data Area (0% ArUco marker pixel bleeding)
                     // Marker corner indexing in OpenCV: 0 = TL, 1 = TR, 2 = BR, 3 = BL
                     var dataTL: Point? = parsedMarkers[0]?.second?.get(2) // Marker 0 (TL) -> Inner BR corner
@@ -145,28 +145,67 @@ class ScreenDetector {
                     var dataBR: Point? = parsedMarkers[2]?.second?.get(0) // Marker 2 (BR) -> Inner TL corner
                     var dataBL: Point? = parsedMarkers[3]?.second?.get(1) // Marker 3 (BL) -> Inner TR corner
 
-                    // Collect all 12+ corner correspondences across visible markers for well-conditioned RANSAC Homography
-                    val allIdeals = mutableListOf<Point>()
-                    val allObserved = mutableListOf<Point>()
-                    for ((id, pair) in parsedMarkers) {
-                        val ideals = MARKER_IDEAL_CORNERS[id] ?: continue
-                        allIdeals.addAll(ideals)
-                        allObserved.addAll(pair.second)
-                    }
+                    if (parsedMarkers.size >= 3) {
+                        // Collect all 12+ corner correspondences across visible markers for well-conditioned RANSAC Homography
+                        val allIdeals = mutableListOf<Point>()
+                        val allObserved = mutableListOf<Point>()
+                        for ((id, pair) in parsedMarkers) {
+                            val ideals = MARKER_IDEAL_CORNERS[id] ?: continue
+                            allIdeals.addAll(ideals)
+                            allObserved.addAll(pair.second)
+                        }
 
-                    // GLARE RECOVERY: Reconstruct missing 4th inner corner using exact Perspective Homography
-                    if (dataTL == null && dataTR != null && dataBR != null && dataBL != null) {
-                        dataTL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[0]!!)
-                            ?: Point(dataTR.x + dataBL.x - dataBR.x, dataTR.y + dataBL.y - dataBR.y)
-                    } else if (dataTR == null && dataTL != null && dataBR != null && dataBL != null) {
-                        dataTR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[1]!!)
-                            ?: Point(dataTL.x + dataBR.x - dataBL.x, dataTL.y + dataBR.y - dataBL.y)
-                    } else if (dataBL == null && dataTL != null && dataTR != null && dataBR != null) {
-                        dataBL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[3]!!)
-                            ?: Point(dataTL.x + dataBR.x - dataTR.x, dataTL.y + dataBR.y - dataTR.y)
-                    } else if (dataBR == null && dataTL != null && dataTR != null && dataBL != null) {
-                        dataBR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[2]!!)
-                            ?: Point(dataTR.x + dataBL.x - dataTL.x, dataTR.y + dataBL.y - dataTL.y)
+                        // GLARE RECOVERY: Reconstruct missing 4th inner corner using exact Perspective Homography
+                        if (dataTL == null && dataTR != null && dataBR != null && dataBL != null) {
+                            dataTL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[0]!!)
+                                ?: Point(dataTR.x + dataBL.x - dataBR.x, dataTR.y + dataBL.y - dataBR.y)
+                        } else if (dataTR == null && dataTL != null && dataBR != null && dataBL != null) {
+                            dataTR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[1]!!)
+                                ?: Point(dataTL.x + dataBR.x - dataBL.x, dataTL.y + dataBR.y - dataBL.y)
+                        } else if (dataBL == null && dataTL != null && dataTR != null && dataBR != null) {
+                            dataBL = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[3]!!)
+                                ?: Point(dataTL.x + dataBR.x - dataTR.x, dataTL.y + dataBR.y - dataTR.y)
+                        } else if (dataBR == null && dataTL != null && dataTR != null && dataBL != null) {
+                            dataBR = projectMissingCorner(allIdeals, allObserved, INNER_CORNER_TARGETS[2]!!)
+                                ?: Point(dataTR.x + dataBL.x - dataTL.x, dataTR.y + dataBL.y - dataTL.y)
+                        }
+                    } else if (parsedMarkers.size == 2) {
+                        // 2-MARKER GEOMETRIC SYNTHESIS: Square aspect ratio (1:1) defines missing corners
+                        if (dataTL != null && dataTR != null) {
+                            val vx = dataTR.x - dataTL.x
+                            val vy = dataTR.y - dataTL.y
+                            dataBL = Point(dataTL.x - vy, dataTL.y + vx)
+                            dataBR = Point(dataTR.x - vy, dataTR.y + vx)
+                        } else if (dataBL != null && dataBR != null) {
+                            val vx = dataBR.x - dataBL.x
+                            val vy = dataBR.y - dataBL.y
+                            dataTL = Point(dataBL.x + vy, dataBL.y - vx)
+                            dataTR = Point(dataBR.x + vy, dataBR.y - vx)
+                        } else if (dataTL != null && dataBL != null) {
+                            val vx = dataBL.x - dataTL.x
+                            val vy = dataBL.y - dataTL.y
+                            dataTR = Point(dataTL.x - vy, dataTL.y + vx)
+                            dataBR = Point(dataBL.x - vy, dataBL.y + vx)
+                        } else if (dataTR != null && dataBR != null) {
+                            val vx = dataBR.x - dataTR.x
+                            val vy = dataBR.y - dataTR.y
+                            dataTL = Point(dataTR.x + vy, dataTR.y - vx)
+                            dataBL = Point(dataBR.x + vy, dataBR.y - vx)
+                        } else if (dataTL != null && dataBR != null) {
+                            val mx = (dataTL.x + dataBR.x) / 2.0
+                            val my = (dataTL.y + dataBR.y) / 2.0
+                            val dx = (dataBR.x - dataTL.x) / 2.0
+                            val dy = (dataBR.y - dataTL.y) / 2.0
+                            dataTR = Point(mx - dy, my + dx)
+                            dataBL = Point(mx + dy, my - dx)
+                        } else if (dataTR != null && dataBL != null) {
+                            val mx = (dataTR.x + dataBL.x) / 2.0
+                            val my = (dataTR.y + dataBL.y) / 2.0
+                            val dx = (dataBL.x - dataTR.x) / 2.0
+                            val dy = (dataBL.y - dataTR.y) / 2.0
+                            dataBR = Point(mx - dy, my + dx)
+                            dataTL = Point(mx + dy, my - dx)
+                        }
                     }
 
                     if (dataTL != null && dataTR != null && dataBR != null && dataBL != null) {
@@ -204,7 +243,7 @@ class ScreenDetector {
         val contours = ArrayList<MatOfPoint>()
 
         try {
-            Imgproc.threshold(grayMat, binaryMat, 160.0, 255.0, Imgproc.THRESH_BINARY)
+            Imgproc.threshold(grayMat, binaryMat, 0.0, 255.0, Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
             Imgproc.findContours(
                 binaryMat,
                 contours,

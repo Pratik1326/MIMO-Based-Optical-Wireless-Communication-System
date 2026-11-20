@@ -637,11 +637,11 @@ fun ModernScannerOverlay(
                                 onClick = onStart,
                                 modifier = Modifier.weight(1f).height(50.dp),
                                 shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF29B6F6))
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Force Re-sync", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("Start Receiving", color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
                                 onClick = onReset,

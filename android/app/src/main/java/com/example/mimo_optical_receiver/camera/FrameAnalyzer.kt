@@ -144,11 +144,9 @@ class FrameAnalyzer(
                     val channels = regionDetector.extractChannels(warpedMat, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channels, activePacketSize)
                     val earlyPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
-                    if (earlyPackets.isNotEmpty() || packetAssembler.lastMagicFound || qrLockedFrames >= 60) {
+                    if (earlyPackets.isNotEmpty()) {
                         currentMode = AnalyzerMode.DECODING_DATA
-                        if (earlyPackets.isNotEmpty()) {
-                            sequenceManager?.processPackets(earlyPackets)
-                        }
+                        sequenceManager?.processPackets(earlyPackets)
                     }
                 } else if (!isLocked) {
                     qrLockedFrames = 0
