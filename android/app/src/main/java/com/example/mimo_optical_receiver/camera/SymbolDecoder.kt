@@ -49,22 +49,17 @@ class SymbolDecoder {
             val width = quadrantMat.cols()
             val height = quadrantMat.rows()
 
-            // CLAHE Equalization: Restores crisp contrast across low-contrast top quadrants
-            val clahe = Imgproc.createCLAHE(2.5, Size(8.0, 8.0))
-            val equalizedMat = Mat()
-            clahe.apply(quadrantMat, equalizedMat)
-
-            // Direct buffer access: 0 JNI allocations per cell
+            // Direct buffer access from raw perspective-corrected quadrant (0 JNI overhead, 0 artificial CLAHE noise amplification)
             val quadBytes = ByteArray(width * height)
-            equalizedMat.get(0, 0, quadBytes)
-            equalizedMat.release()
+            quadrantMat.get(0, 0, quadBytes)
 
             val cellWidth = width / gridSide.toDouble()
             val cellHeight = height / gridSide.toDouble()
 
-            // Center-Cell Core Sampling Insets (25% margin on all 4 sides of each cell)
-            val insetX = cellWidth * 0.25
-            val insetY = cellHeight * 0.25
+            // High-precision center-cell core sampling: 28% guard inset on all 4 sides of each cell
+            // (eliminates optical blur and subpixel transition bleeding from neighboring cells)
+            val insetX = cellWidth * 0.28
+            val insetY = cellHeight * 0.28
 
             var sampleMin = 255.0
             var sampleMax = 0.0

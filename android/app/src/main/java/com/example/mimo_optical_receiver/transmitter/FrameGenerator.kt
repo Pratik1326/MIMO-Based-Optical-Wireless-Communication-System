@@ -14,7 +14,7 @@ class FrameGenerator(
     val markerSize: Int = 44,
     val markerMargin: Int = 6,
     val borderThickness: Int = 4,
-    val gridThickness: Int = 1,
+    val gridThickness: Int = 2,
     val safeZonePercent: Float = 0.10f
 ) {
     val safeZoneMargin = (baseWidth * safeZonePercent).roundToInt()

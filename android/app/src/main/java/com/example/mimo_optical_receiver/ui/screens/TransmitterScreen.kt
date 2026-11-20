@@ -159,24 +159,18 @@ fun TransmitterScreen() {
             ) {
                 val bmp = currentBitmap
                 if (bmp != null && !bmp.isRecycled) {
-                    val frameIndexTrigger = stats.currentFrameIndex
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        // Subscribe directly to frameIndexTrigger so Compose invalidates and redraws on every tick
-                        val currentTick = frameIndexTrigger
-                        drawIntoCanvas { canvas ->
-                            val paint = Paint().asFrameworkPaint().apply {
-                                isFilterBitmap = false // Nearest-neighbor sharp pixels, zero blur
-                                isDither = false
-                            }
-                            val srcRect = android.graphics.Rect(0, 0, bmp.width, bmp.height)
-                            val dstRect = android.graphics.Rect(0, 0, size.width.toInt(), size.height.toInt())
-                            canvas.nativeCanvas.drawBitmap(bmp, srcRect, dstRect, paint)
-                        }
+                    key(stats.currentFrameIndex, stats.carouselCycle, stats.state) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "MIMO Optical Stream",
+                            filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
 
                     // Minimalist top overlay badge
                     Surface(
-                        color = Color.Black.copy(alpha = 0.65f),
+                        color = Color.Black.copy(alpha = 0.75f),
                         shape = CircleShape,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
@@ -185,7 +179,7 @@ fun TransmitterScreen() {
                         Text(
                             text = when (stats.state) {
                                 TransmissionState.QR_HANDSHAKE -> "PHASE 1: QR HANDSHAKE"
-                                TransmissionState.TRANSMITTING -> "STREAMING: ${stats.currentFrameIndex}/${stats.totalMimoFrames} (CYCLE ${stats.carouselCycle})"
+                                TransmissionState.TRANSMITTING -> "STREAMING: Frame ${stats.currentFrameIndex}/${stats.totalMimoFrames} (Cycle ${stats.carouselCycle})"
                                 TransmissionState.PAUSED -> "PAUSED"
                                 else -> ""
                             },
@@ -399,22 +393,37 @@ fun TransmitterScreen() {
                             }
                         }
 
-                        Button(
-                            onClick = { engine.startStreaming() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                if (autoStartCountdown > 0) "START OPTICAL DATA STREAM (${autoStartCountdown}s)" else "START OPTICAL DATA STREAM",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                fontSize = 15.sp
-                            )
+                            Button(
+                                onClick = { engine.startStreaming() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    if (autoStartCountdown > 0) "START STREAM NOW (${autoStartCountdown}s)" else "START DATA STREAM",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = { autoStartCountdown += 10 },
+                                modifier = Modifier.height(52.dp),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Default.MoreTime, contentDescription = null)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("+10s", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

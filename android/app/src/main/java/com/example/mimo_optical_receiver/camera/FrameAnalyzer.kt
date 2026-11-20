@@ -140,16 +140,23 @@ class FrameAnalyzer(
                 val isLocked = warpedMat != null
                 if (isLocked && sequenceManager != null) {
                     qrLockedFrames++
-                    if (qrLockedFrames >= 10) {
+                    // Check if monitor is already displaying data packets (seamless zero-wait handoff)
+                    val channels = regionDetector.extractChannels(warpedMat, activeMimoMode)
+                    val decodeResult = symbolDecoder.decode(channels, activePacketSize)
+                    val earlyPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
+                    if (earlyPackets.isNotEmpty() || packetAssembler.lastMagicFound || qrLockedFrames >= 60) {
                         currentMode = AnalyzerMode.DECODING_DATA
+                        if (earlyPackets.isNotEmpty()) {
+                            sequenceManager?.processPackets(earlyPackets)
+                        }
                     }
                 } else if (!isLocked) {
                     qrLockedFrames = 0
                 }
 
                 val statusMsg = when {
-                    sequenceManager != null && isLocked -> "METADATA SYNCED • STARTING..."
-                    sequenceManager != null && !isLocked -> "METADATA SYNCED! Step back to fit screen (${detectionResult.markerCount}/4)"
+                    sequenceManager != null && isLocked -> "HANDSHAKE SYNCED • Waiting for stream to start..."
+                    sequenceManager != null && !isLocked -> "HANDSHAKE SYNCED! Step back to fit screen (${detectionResult.markerCount}/4)"
                     detectionResult.isObstructed -> "⚠️ VIEW OBSTRUCTED: ${detectionResult.obstructionReason ?: "Clear camera path"}"
                     isLocked -> "SCREEN LOCKED • SCANNING QR..."
                     detectionResult.markerCount in 1..3 -> "MOVE BACK: Fit all 4 screen corners (${detectionResult.markerCount}/4)"
@@ -191,7 +198,7 @@ class FrameAnalyzer(
                     currentIntensities = decodeResult.intensities
 
                     // Decode each quadrant channel independently without serial concatenating or bit-slip
-                    val validPackets = packetAssembler.processChannelBits(decodeResult.channelBits)
+                    val validPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
 
                     DiagnosticLogger.logFrameDecode(
                         frameIndex = frameCount,

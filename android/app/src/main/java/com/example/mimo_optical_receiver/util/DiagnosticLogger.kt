@@ -18,7 +18,11 @@ object DiagnosticLogger {
     fun log(tag: String, message: String) {
         val timestamp = dateFormat.format(Date())
         val entry = "[$timestamp][$tag] $message"
-        Log.d(tag, message)
+        try {
+            Log.d(tag, message)
+        } catch (_: Throwable) {
+            // Android Log not mocked during desktop JVM unit tests
+        }
         logBuffer.add(entry)
         while (logBuffer.size > MAX_LOG_ENTRIES) {
             logBuffer.removeFirst()

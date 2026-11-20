@@ -155,7 +155,7 @@ class TransmissionEngine(
 
     /**
      * Advances from Phase 1 (QR Handshake) to Phase 2 (Live Optical MIMO Stream).
-     * Renders frames dynamically on each tick into alternating bitmap buffers.
+     * Immediately renders the initial frame and plays continuous carousel stream at target FPS.
      */
     fun startStreaming() {
         if (totalFrames <= 0 || preparedPackets.isEmpty()) return
@@ -181,38 +181,44 @@ class TransmissionEngine(
         val buffers = streamBitmaps ?: return
         val pixelsBuf = streamPixelsBuffer ?: return
 
+        // 1. Immediately render Frame 0 so screen switches from QR to data stream with zero lag
+        fun renderFrameToBuffer(frameIdx: Int, bufIdx: Int) {
+            val channelMap = mutableMapOf<Int, IntArray>()
+            for (ch in 0 until chCount) {
+                val packetIdx = frameIdx * chCount + ch
+                val packet = if (packetIdx < totalPackets) {
+                    val orig = packetsList[packetIdx]
+                    Packet(orig.frameType, ch, orig.sequenceId, orig.payload, orig.version)
+                } else {
+                    val last = packetsList.last()
+                    Packet(last.frameType, ch, last.sequenceId, last.payload, last.version)
+                }
+
+                val encodedBytes = PacketEncoder.encode(packet)
+                val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim)
+                channelMap[ch] = quadPixels
+            }
+
+            frameGenerator.renderDataInto(pixelsBuf, channelMap, qDim, mode)
+            val targetBmp = buffers[bufIdx]
+            targetBmp.setPixels(pixelsBuf, 0, totalW, 0, 0, totalW, totalH)
+            targetBmp.prepareToDraw()
+            _currentBitmap.value = targetBmp
+        }
+
+        renderFrameToBuffer(0, activeBufferIndex)
+        activeBufferIndex = 1 - activeBufferIndex
+        _stats.value = _stats.value.copy(currentFrameIndex = 1)
+
         playbackJob = scope.launch(Dispatchers.Default) {
             var frameIdx = 0
             var cycle = 1
 
             while (isActive) {
-                // 1. Synthesize spatial quadrant channels for this frame index
-                val channelMap = mutableMapOf<Int, IntArray>()
-                for (ch in 0 until chCount) {
-                    val packetIdx = frameIdx * chCount + ch
-                    val packet = if (packetIdx < totalPackets) {
-                        val orig = packetsList[packetIdx]
-                        Packet(orig.frameType, ch, orig.sequenceId, orig.payload, orig.version)
-                    } else {
-                        val last = packetsList.last()
-                        Packet(last.frameType, ch, last.sequenceId, last.payload, last.version)
-                    }
-
-                    val encodedBytes = PacketEncoder.encode(packet)
-                    val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim)
-                    channelMap[ch] = quadPixels
-                }
-
-                // 2. Render frame pixels into the pre-allocated buffer
-                frameGenerator.renderDataInto(pixelsBuf, channelMap, qDim, mode)
-
-                // 3. Write into alternating double-buffer Bitmap to force Compose recomposition
-                val targetBmp = buffers[activeBufferIndex]
-                targetBmp.setPixels(pixelsBuf, 0, totalW, 0, 0, totalW, totalH)
-                _currentBitmap.value = targetBmp
+                renderFrameToBuffer(frameIdx, activeBufferIndex)
                 activeBufferIndex = 1 - activeBufferIndex
 
-                // 4. Update transmission statistics
+                // Update transmission statistics
                 val elapsedSec = (System.currentTimeMillis() - transmissionStartTime) / 1000.0
                 transmittedBytesCounter += (chCount * 79L)
                 val throughput = if (elapsedSec > 0.5) (transmittedBytesCounter / 1024.0) / elapsedSec else 0.0
