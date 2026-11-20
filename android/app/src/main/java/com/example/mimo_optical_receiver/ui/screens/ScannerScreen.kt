@@ -627,29 +627,59 @@ fun ModernScannerOverlay(
                     }
                 }
                 uiState.currentState == "RECEIVING_DATA" -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onPause,
-                            modifier = Modifier.weight(1f).height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    if (uiState.validPacketsReceived == 0) {
+                        // Handshake complete, awaiting stream frames: provide manual force start and rescan controls
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Default.Pause, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Pause")
+                            Button(
+                                onClick = onStart,
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF29B6F6))
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Force Re-sync", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = onReset,
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Rescan QR")
+                            }
                         }
-                        Button(
-                            onClick = onReset,
-                            modifier = Modifier.weight(1f).height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    } else {
+                        // Actively receiving stream packets
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cancel")
+                            OutlinedButton(
+                                onClick = onPause,
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.Pause, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pause")
+                            }
+                            Button(
+                                onClick = onReset,
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Cancel")
+                            }
                         }
                     }
                 }
@@ -724,7 +754,7 @@ fun ModernScannerOverlay(
                             when {
                                 uiState.isPerspectiveLocked -> "SCREEN LOCKED • SCANNING QR METADATA..."
                                 uiState.arucoMarkersDetected > 0 -> "ALIGNING ARUCO (${uiState.arucoMarkersDetected}/4)"
-                                else -> "POINT CAMERA AT PC SCREEN"
+                                else -> "POINT CAMERA AT TRANSMITTER SCREEN"
                             },
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White,

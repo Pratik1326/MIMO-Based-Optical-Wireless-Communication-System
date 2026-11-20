@@ -27,7 +27,7 @@ object DeviceProfiler {
         return when {
             totalRamGb <= 4.0 -> DeviceProfile(DeviceTier.LOW_TIER, totalRamGb, 1280, 720)
             totalRamGb <= 8.0 -> DeviceProfile(DeviceTier.BALANCED_TIER, totalRamGb, 1280, 720)
-            else -> DeviceProfile(DeviceTier.HIGH_TIER, totalRamGb, 1920, 1080)
+            else -> DeviceProfile(DeviceTier.HIGH_TIER, totalRamGb, 1280, 720)
         }
     }
 }
