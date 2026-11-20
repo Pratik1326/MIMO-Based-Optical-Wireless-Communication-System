@@ -57,17 +57,18 @@ fun TransmitterScreen() {
     var selectedMimoMode by remember { mutableStateOf("2x2") }
     var selectedFps by remember { mutableIntStateOf(15) }
     var selectedPacketSize by remember { mutableIntStateOf(64) }
-    var autoStartCountdown by remember { mutableIntStateOf(4) }
+    var autoStartCountdown by remember { mutableIntStateOf(0) }
+    var enableAutoCountdown by remember { mutableStateOf(false) }
 
-    // Automatic stream countdown: gives the receiver 4 seconds to scan QR metadata before auto-starting optical stream hands-free
-    LaunchedEffect(stats.state) {
-        if (stats.state == TransmissionState.QR_HANDSHAKE) {
-            autoStartCountdown = 4
+    // Optional stream countdown: only active if user explicitly enables timer
+    LaunchedEffect(stats.state, enableAutoCountdown) {
+        if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
+            autoStartCountdown = 15
             while (autoStartCountdown > 0) {
                 kotlinx.coroutines.delay(1000)
                 autoStartCountdown--
             }
-            if (stats.state == TransmissionState.QR_HANDSHAKE) {
+            if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
                 engine.startStreaming()
             }
         }
@@ -400,10 +401,10 @@ fun TransmitterScreen() {
                                 Column {
                                     Text("Phase 1: QR Handshake Ready", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     Text(
-                                        if (autoStartCountdown > 0)
+                                        if (enableAutoCountdown && autoStartCountdown > 0)
                                             "Point receiver phone at screen. Auto-starting optical stream in ${autoStartCountdown}s..."
                                         else
-                                            "Point receiving phone at screen to synchronize session metadata.",
+                                            "Point receiver phone at screen to sync. Tap START DATA STREAM when ready.",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -426,7 +427,7 @@ fun TransmitterScreen() {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    if (autoStartCountdown > 0) "START STREAM NOW (${autoStartCountdown}s)" else "START DATA STREAM",
+                                    if (enableAutoCountdown && autoStartCountdown > 0) "START NOW (${autoStartCountdown}s)" else "START DATA STREAM",
                                     fontWeight = FontWeight.Bold,
                                     color = Color.Black,
                                     fontSize = 14.sp
@@ -434,13 +435,16 @@ fun TransmitterScreen() {
                             }
 
                             OutlinedButton(
-                                onClick = { autoStartCountdown += 10 },
+                                onClick = {
+                                    enableAutoCountdown = !enableAutoCountdown
+                                    if (enableAutoCountdown) autoStartCountdown = 15
+                                },
                                 modifier = Modifier.height(52.dp),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Icon(Icons.Default.MoreTime, contentDescription = null)
+                                Icon(Icons.Default.AccessTime, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("+10s", fontWeight = FontWeight.Bold)
+                                Text(if (enableAutoCountdown) "Manual" else "Timer (15s)", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
