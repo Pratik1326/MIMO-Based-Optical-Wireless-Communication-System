@@ -134,6 +134,8 @@ class FrameAnalyzer(
                         packetSize = metadata.packet_size,
                         mimoMode = metadata.mimo_mode
                     )
+                    currentMode = AnalyzerMode.DECODING_DATA
+                    DiagnosticLogger.log("ACTION", "QR Handshake verified (${metadata.filename}, ${metadata.total_packets} pkts, ${metadata.mimo_mode}). Transitioning to DECODING_DATA mode.")
                     onQrScanned(metadata)
                 }
                 

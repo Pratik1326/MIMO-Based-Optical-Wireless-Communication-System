@@ -54,11 +54,11 @@ class PacketAssembler {
                     val headerBytes = extractBytes(chBits, bitIdx, ProtocolConstants.HEADER_SIZE_BYTES)
                     val b1 = headerBytes[9].toInt() and 0xFF
                     val b2 = headerBytes[10].toInt() and 0xFF
-                    var payloadLength = (b1 shl 8) or b2
+                    val payloadLength = (b1 shl 8) or b2
 
-                    // If length field had bit corruption, test fallback to expected packet size
-                    if (payloadLength <= 0 || payloadLength > 2048) {
-                        payloadLength = expectedPacketSize
+                    // Discard noise candidates where payload length exceeds valid optical bounds [1..expectedPacketSize]
+                    if (payloadLength <= 0 || payloadLength > expectedPacketSize) {
+                        continue
                     }
 
                     val totalPacketBytes = ProtocolConstants.HEADER_SIZE_BYTES + payloadLength + ProtocolConstants.CRC_SIZE_BYTES

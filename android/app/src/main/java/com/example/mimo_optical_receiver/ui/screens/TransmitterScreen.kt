@@ -57,16 +57,18 @@ fun TransmitterScreen() {
     var selectedMimoMode by remember { mutableStateOf("2x2") }
     var selectedFps by remember { mutableIntStateOf(15) }
     var selectedPacketSize by remember { mutableIntStateOf(64) }
-    var autoStartCountdown by remember { mutableIntStateOf(0) }
-    var enableAutoCountdown by remember { mutableStateOf(false) }
+    var autoStartCountdown by remember { mutableIntStateOf(5) }
+    var enableAutoCountdown by remember { mutableStateOf(true) }
 
-    // Optional stream countdown: only active if user explicitly enables timer
+    // Automatic stream countdown: gives the receiver 5 seconds to scan QR metadata before auto-starting optical stream hands-free
     LaunchedEffect(stats.state, enableAutoCountdown) {
         if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
-            autoStartCountdown = 15
-            while (autoStartCountdown > 0) {
+            autoStartCountdown = 5
+            while (autoStartCountdown > 0 && enableAutoCountdown) {
                 kotlinx.coroutines.delay(1000)
-                autoStartCountdown--
+                if (enableAutoCountdown) {
+                    autoStartCountdown--
+                }
             }
             if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
                 engine.startStreaming()
@@ -112,6 +114,16 @@ fun TransmitterScreen() {
                     selectedFileName = fileName
                     selectedFileBytes = bytes
                     Toast.makeText(context, "Loaded: $fileName (${bytes.size} bytes)", Toast.LENGTH_SHORT).show()
+                    // Auto-generate dynamic Phase 1 QR Handshake immediately on file selection
+                    coroutineScope.launch {
+                        engine.prepare(
+                            data = bytes,
+                            filename = fileName,
+                            mimoMode = selectedMimoMode,
+                            targetFps = selectedFps,
+                            packetSize = selectedPacketSize
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 Toast.makeText(context, "Failed to read file: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -299,9 +311,20 @@ fun TransmitterScreen() {
                                     onClick = {
                                         val sampleText = "Hello from Mobile-to-Mobile MIMO Optical Link! Timestamp: ${System.currentTimeMillis()}\n" +
                                                 "MIMO Optical Wireless Communication System allows high-speed simplex data streaming between smartphones."
+                                        val sampleBytes = sampleText.toByteArray(Charsets.UTF_8)
                                         selectedFileName = "demo_sample.txt"
-                                        selectedFileBytes = sampleText.toByteArray(Charsets.UTF_8)
+                                        selectedFileBytes = sampleBytes
                                         Toast.makeText(context, "Loaded demo sample (140B)", Toast.LENGTH_SHORT).show()
+                                        // Auto-generate dynamic Phase 1 QR Handshake immediately on demo sample load
+                                        coroutineScope.launch {
+                                            engine.prepare(
+                                                data = sampleBytes,
+                                                filename = "demo_sample.txt",
+                                                mimoMode = selectedMimoMode,
+                                                targetFps = selectedFps,
+                                                packetSize = selectedPacketSize
+                                            )
+                                        }
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(10.dp)
@@ -321,7 +344,21 @@ fun TransmitterScreen() {
                             listOf("1x1", "2x2", "4x4").forEach { mode ->
                                 FilterChip(
                                     selected = selectedMimoMode == mode,
-                                    onClick = { selectedMimoMode = mode },
+                                    onClick = {
+                                        selectedMimoMode = mode
+                                        val bytes = selectedFileBytes
+                                        if (bytes != null && bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                engine.prepare(
+                                                    data = bytes,
+                                                    filename = selectedFileName ?: "transmission.bin",
+                                                    mimoMode = mode,
+                                                    targetFps = selectedFps,
+                                                    packetSize = selectedPacketSize
+                                                )
+                                            }
+                                        }
+                                    },
                                     label = { Text(mode, fontWeight = FontWeight.Bold) },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -336,7 +373,21 @@ fun TransmitterScreen() {
                             listOf(10, 15, 30).forEach { fps ->
                                 FilterChip(
                                     selected = selectedFps == fps,
-                                    onClick = { selectedFps = fps },
+                                    onClick = {
+                                        selectedFps = fps
+                                        val bytes = selectedFileBytes
+                                        if (bytes != null && bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                engine.prepare(
+                                                    data = bytes,
+                                                    filename = selectedFileName ?: "transmission.bin",
+                                                    mimoMode = selectedMimoMode,
+                                                    targetFps = fps,
+                                                    packetSize = selectedPacketSize
+                                                )
+                                            }
+                                        }
+                                    },
                                     label = { Text("$fps FPS", fontWeight = FontWeight.Bold) },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -402,7 +453,7 @@ fun TransmitterScreen() {
                                     Text("Phase 1: QR Handshake Ready", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     Text(
                                         if (enableAutoCountdown && autoStartCountdown > 0)
-                                            "Point receiver phone at screen. Auto-starting optical stream in ${autoStartCountdown}s..."
+                                            "Point receiver phone at screen. Auto-starting stream in ${autoStartCountdown}s..."
                                         else
                                             "Point receiver phone at screen to sync. Tap START DATA STREAM when ready.",
                                         fontSize = 12.sp,
@@ -437,14 +488,40 @@ fun TransmitterScreen() {
                             OutlinedButton(
                                 onClick = {
                                     enableAutoCountdown = !enableAutoCountdown
-                                    if (enableAutoCountdown) autoStartCountdown = 15
+                                    if (enableAutoCountdown) autoStartCountdown = 5
                                 },
                                 modifier = Modifier.height(52.dp),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Icon(Icons.Default.AccessTime, contentDescription = null)
+                                Icon(if (enableAutoCountdown) Icons.Default.Pause else Icons.Default.AccessTime, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (enableAutoCountdown) "Manual" else "Timer (15s)", fontWeight = FontWeight.Bold)
+                                Text(if (enableAutoCountdown) "Pause (5s)" else "Auto (5s)", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // MIMO Mode Quick Switch during QR Handshake
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("1x1", "2x2", "4x4").forEach { mode ->
+                                FilterChip(
+                                    selected = selectedMimoMode == mode,
+                                    onClick = {
+                                        selectedMimoMode = mode
+                                        val bytes = selectedFileBytes
+                                        if (bytes != null && bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                engine.prepare(
+                                                    data = bytes,
+                                                    filename = selectedFileName ?: "transmission.bin",
+                                                    mimoMode = mode,
+                                                    targetFps = selectedFps,
+                                                    packetSize = selectedPacketSize
+                                                )
+                                            }
+                                        }
+                                    },
+                                    label = { Text("MIMO $mode", fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
