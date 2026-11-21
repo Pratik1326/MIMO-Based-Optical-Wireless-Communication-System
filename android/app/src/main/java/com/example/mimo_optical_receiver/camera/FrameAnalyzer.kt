@@ -135,20 +135,20 @@ class FrameAnalyzer(
                         packetSize = metadata.packet_size,
                         mimoMode = metadata.mimo_mode
                     )
-                    currentMode = AnalyzerMode.DECODING_DATA
-                    DiagnosticLogger.log("ACTION", "QR Handshake verified (${metadata.filename}, ${metadata.total_packets} pkts, ${metadata.mimo_mode}). Transitioning to DECODING_DATA mode.")
+                    DiagnosticLogger.log("ACTION", "QR Handshake verified (${metadata.filename}, ${metadata.total_packets} pkts, ${metadata.mimo_mode}). Awaiting live optical stream.")
                     onQrScanned(metadata)
                 }
                 
                 val isLocked = warpedMat != null
                 if (isLocked && sequenceManager != null) {
                     qrLockedFrames++
-                    // Check if monitor is already displaying data packets (seamless zero-wait handoff)
+                    // Check if transmitter has flipped from Phase 1 QR to Phase 2 live data stream
                     val channels = regionDetector.extractChannels(warpedMat, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channels, activePacketSize)
                     val earlyPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
                     if (earlyPackets.isNotEmpty()) {
                         currentMode = AnalyzerMode.DECODING_DATA
+                        DiagnosticLogger.log("ACTION", "Live optical data stream detected (${earlyPackets.size} packets). Transitioning to DECODING_DATA mode.")
                         sequenceManager?.processPackets(earlyPackets)
                     }
                 } else if (!isLocked) {

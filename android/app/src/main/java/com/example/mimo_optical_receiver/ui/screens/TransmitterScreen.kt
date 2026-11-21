@@ -56,14 +56,14 @@ fun TransmitterScreen() {
     var selectedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var selectedMimoMode by remember { mutableStateOf("2x2") }
     var selectedFps by remember { mutableIntStateOf(15) }
-    var selectedPacketSize by remember { mutableIntStateOf(64) }
-    var autoStartCountdown by remember { mutableIntStateOf(0) }
-    var enableAutoCountdown by remember { mutableStateOf(false) }
+    var selectedPacketSize by remember { mutableIntStateOf(128) }
+    var autoStartCountdown by remember { mutableIntStateOf(3) }
+    var enableAutoCountdown by remember { mutableStateOf(true) }
 
-    // Stream countdown: only active if user explicitly enables timer
+    // Stream countdown: auto-advances to live stream in 3s for zero-wait handoff
     LaunchedEffect(stats.state, enableAutoCountdown) {
         if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
-            autoStartCountdown = 10
+            autoStartCountdown = 3
             while (autoStartCountdown > 0 && enableAutoCountdown) {
                 kotlinx.coroutines.delay(1000)
                 if (enableAutoCountdown) {
@@ -388,6 +388,35 @@ fun TransmitterScreen() {
                         }
                     }
 
+                    // Packet Size (Payload) Selector
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Packet Payload Size", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(64 to "64 B", 128 to "128 B", 256 to "256 B").forEach { (size, label) ->
+                                FilterChip(
+                                    selected = selectedPacketSize == size,
+                                    onClick = {
+                                        selectedPacketSize = size
+                                        val bytes = selectedFileBytes
+                                        if (bytes != null && bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                engine.prepare(
+                                                    data = bytes,
+                                                    filename = selectedFileName ?: "transmission.bin",
+                                                    mimoMode = selectedMimoMode,
+                                                    targetFps = selectedFps,
+                                                    packetSize = size
+                                                )
+                                            }
+                                        }
+                                    },
+                                    label = { Text(label, fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
                     // Generate & Broadcast Button
                     Button(
                         onClick = {
@@ -486,14 +515,14 @@ fun TransmitterScreen() {
                             OutlinedButton(
                                 onClick = {
                                     enableAutoCountdown = !enableAutoCountdown
-                                    if (enableAutoCountdown) autoStartCountdown = 10
+                                    if (enableAutoCountdown) autoStartCountdown = 3
                                 },
                                 modifier = Modifier.height(52.dp),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Icon(if (enableAutoCountdown) Icons.Default.Pause else Icons.Default.AccessTime, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (enableAutoCountdown) "Pause (${autoStartCountdown}s)" else "Timer (10s)", fontWeight = FontWeight.Bold)
+                                Text(if (enableAutoCountdown) "Pause (${autoStartCountdown}s)" else "Timer (3s)", fontWeight = FontWeight.Bold)
                             }
                         }
 

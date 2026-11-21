@@ -21,16 +21,16 @@ class ScreenDetector {
     // Pre-allocated, high-performance detector parameters (avoids native JNI allocation churn in hot analyze() loop)
     private val detectorParameters: DetectorParameters = DetectorParameters.create().apply {
         set_adaptiveThreshWinSizeMin(3)
-        set_adaptiveThreshWinSizeMax(23)
-        set_adaptiveThreshWinSizeStep(10)
+        set_adaptiveThreshWinSizeMax(35)
+        set_adaptiveThreshWinSizeStep(8)
         set_adaptiveThreshConstant(7.0)
-        set_polygonalApproxAccuracyRate(0.04)
+        set_polygonalApproxAccuracyRate(0.05)
         set_errorCorrectionRate(0.8)
-        set_minMarkerPerimeterRate(0.025) // Filters out individual data matrix cells (< 100 px perimeter)
-        set_maxMarkerPerimeterRate(0.50)  // Filters out giant full-screen contours
+        set_minMarkerPerimeterRate(0.015) // Allows reliable detection at longer range / smaller angle
+        set_maxMarkerPerimeterRate(0.60)  // Filters out giant full-screen contours
         set_perspectiveRemovePixelPerCell(6)
-        set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
-        set_cornerRefinementMaxIterations(15)
+        set_cornerRefinementMethod(Aruco.CORNER_REFINE_CONTOUR)
+        set_cornerRefinementMaxIterations(20)
         set_cornerRefinementMinAccuracy(0.05)
     }
 
@@ -391,9 +391,9 @@ class ScreenDetector {
             }
         }
 
-        // DEADBAND: If corner micro-drift is below 3.5 px (typical handheld sensor noise),
+        // DEADBAND: If corner micro-drift is below 4.0 px (typical handheld sensor noise),
         // keep previous corners 100% frozen! This eliminates green box jiggling and sampling grid wobble.
-        if (maxDisplacementSq < 12.25) { // 3.5^2 = 12.25
+        if (maxDisplacementSq < 16.0) { // 4.0^2 = 16.0
             return prev
         }
 
