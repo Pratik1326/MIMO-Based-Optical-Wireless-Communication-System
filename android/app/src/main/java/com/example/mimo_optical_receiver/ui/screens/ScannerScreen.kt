@@ -527,8 +527,8 @@ fun ModernScannerOverlay(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
@@ -540,12 +540,12 @@ fun ModernScannerOverlay(
             ) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = Color.Black.copy(alpha = 0.75f)
                     )
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -555,7 +555,7 @@ fun ModernScannerOverlay(
                                 text = uiState.qrFilename ?: "Transfer File",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
+                                fontSize = 14.sp,
                                 maxLines = 1
                             )
                             Surface(
@@ -572,20 +572,20 @@ fun ModernScannerOverlay(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         // Progress bar
                         LinearProgressIndicator(
                             progress = { uiState.transferProgress },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
                             color = Color(0xFF00E676),
                             trackColor = Color.White.copy(alpha = 0.15f)
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -593,15 +593,15 @@ fun ModernScannerOverlay(
                         ) {
                             val pct = (uiState.transferProgress * 100).toInt()
                             Text(
-                                text = "${uiState.validPacketsReceived} / ${uiState.qrTotalPackets} Packets ($pct%)",
+                                text = "${uiState.validPacketsReceived} / ${uiState.qrTotalPackets} Pkts ($pct%)",
                                 color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                             if (uiState.currentState == "RECEIVING_DATA" || uiState.currentState == "STALLED") {
                                 Text(
                                     text = "%.1f KB/s".format(uiState.throughputKbs),
                                     color = if (uiState.currentState == "STALLED") Color(0xFFFFB300) else Color(0xFF00E676),
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -617,13 +617,14 @@ fun ModernScannerOverlay(
                         onClick = onViewFile,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
                     ) {
-                        Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("VIEW RECEIVED FILE", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 15.sp)
+                        Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("VIEW RECEIVED FILE", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 14.sp, maxLines = 1, softWrap = false)
                     }
                 }
                 uiState.currentState == "RECEIVING_DATA" -> {
@@ -631,65 +632,79 @@ fun ModernScannerOverlay(
                         // Handshake complete, awaiting stream frames: provide manual force start and rescan controls
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             val isActivelyDecoding = analyzerMode == FrameAnalyzer.AnalyzerMode.DECODING_DATA
                             Button(
                                 onClick = onStart,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (isActivelyDecoding) Color(0xFF00B0FF) else Color(0xFF00E676)
-                                )
+                                ),
+                                contentPadding = PaddingValues(horizontal = 6.dp)
                             ) {
                                 Icon(
                                     if (isActivelyDecoding) Icons.Default.Sync else Icons.Default.PlayArrow,
                                     contentDescription = null,
-                                    tint = Color.Black
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    if (isActivelyDecoding) "Scanning Stream..." else "Start Receiving",
+                                    if (isActivelyDecoding) "Scanning..." else "Start Receiving",
                                     color = Color.Black,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                             OutlinedButton(
                                 onClick = onReset,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 6.dp)
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Rescan QR")
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Rescan QR",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     } else {
                         // Actively receiving stream packets
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
                                 onClick = onPause,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 6.dp)
                             ) {
-                                Icon(Icons.Default.Pause, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Pause")
+                                Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Pause", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                             Button(
                                 onClick = onReset,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                modifier = Modifier.weight(1f).height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                contentPadding = PaddingValues(horizontal = 6.dp)
                             ) {
-                                Icon(Icons.Default.Stop, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Cancel")
+                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Cancel", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
                     }

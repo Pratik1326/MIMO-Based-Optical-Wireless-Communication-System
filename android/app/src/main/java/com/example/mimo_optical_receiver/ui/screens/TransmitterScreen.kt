@@ -141,7 +141,22 @@ fun TransmitterScreen() {
                 title = {
                     Column {
                         Text("MIMO Optical Transmitter", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text("Mobile-to-Mobile Optical Link", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = when (stats.state) {
+                                TransmissionState.TRANSMITTING -> "Streaming: Frame ${stats.currentFrameIndex}/${stats.totalMimoFrames} (Cycle ${stats.carouselCycle}) • ${stats.targetFps} FPS"
+                                TransmissionState.QR_HANDSHAKE -> "Phase 1: QR Handshake Ready"
+                                TransmissionState.PAUSED -> "Transmission Paused"
+                                else -> "Mobile-to-Mobile Optical Link"
+                            },
+                            fontSize = 12.sp,
+                            color = when (stats.state) {
+                                TransmissionState.TRANSMITTING -> Color(0xFF00E676)
+                                TransmissionState.QR_HANDSHAKE -> Color(0xFF29B6F6)
+                                TransmissionState.PAUSED -> Color(0xFFFFB300)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = if (stats.state != TransmissionState.IDLE) FontWeight.SemiBold else FontWeight.Normal
+                        )
                     }
                 },
                 actions = {
@@ -155,31 +170,38 @@ fun TransmitterScreen() {
             )
         }
     ) { innerPadding ->
+        val isTransmittingOrReady = stats.state != TransmissionState.IDLE
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .then(
+                    if (!isTransmittingOrReady) {
+                        Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    } else {
+                        Modifier
+                            .padding(horizontal = 2.dp, vertical = 4.dp)
+                    }
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = if (!isTransmittingOrReady) Arrangement.spacedBy(16.dp) else Arrangement.spacedBy(8.dp)
         ) {
 
-            // 1. TRANSMISSION DISPLAY CANVAS (Square 1:1 Aspect Ratio)
+            // 1. TRANSMISSION DISPLAY CANVAS (Square 1:1 Aspect Ratio, maximized)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(if (isTransmittingOrReady) 6.dp else 16.dp))
                     .background(Color.Black)
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp)),
+                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(if (isTransmittingOrReady) 6.dp else 16.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 val bmp = currentBitmap
                 if (bmp != null && !bmp.isRecycled) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val trigger = stats.currentFrameIndex
-                        val cycleTrigger = stats.carouselCycle
                         drawIntoCanvas { canvas ->
                             val paint = Paint().asFrameworkPaint().apply {
                                 isFilterBitmap = false
@@ -190,40 +212,7 @@ fun TransmitterScreen() {
                             canvas.nativeCanvas.drawBitmap(bmp, src, dst, paint)
                         }
                     }
-
-                    // Minimalist top overlay badge with active transmission beacon
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.75f),
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 10.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            if (stats.state == TransmissionState.TRANSMITTING) {
-                                Surface(
-                                    color = Color(0xFF00E676),
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(7.dp)
-                                ) {}
-                                Spacer(modifier = Modifier.width(6.dp))
-                            }
-                            Text(
-                                text = when (stats.state) {
-                                    TransmissionState.QR_HANDSHAKE -> "PHASE 1: QR HANDSHAKE"
-                                    TransmissionState.TRANSMITTING -> "STREAMING: Frame ${stats.currentFrameIndex}/${stats.totalMimoFrames} (Cycle ${stats.carouselCycle}) • ${stats.targetFps} FPS"
-                                    TransmissionState.PAUSED -> "PAUSED"
-                                    else -> ""
-                                },
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    // Pure optical transmission canvas: ZERO overlays or text inside to prevent optical corruption!
                 } else {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -444,7 +433,12 @@ fun TransmitterScreen() {
                 }
 
                 TransmissionState.QR_HANDSHAKE -> {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
@@ -532,102 +526,88 @@ fun TransmitterScreen() {
                 }
 
                 TransmissionState.TRANSMITTING -> {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // Live Stats Bar
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { engine.pause() },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("Frame", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("${stats.currentFrameIndex} / ${stats.totalMimoFrames}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                                Column {
-                                    Text("Packets", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("${stats.totalPackets}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                                Column {
-                                    Text("Carousel", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("Cycle ${stats.carouselCycle}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                                Column {
-                                    Text("Rate", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("${stats.targetFps} FPS", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                            }
+                            Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Pause", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        FilledTonalButton(
+                            onClick = { engine.showQr() },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = { engine.pause() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Pause, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Pause")
-                            }
+                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Show QR", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        }
 
-                            FilledTonalButton(
-                                onClick = { engine.showQr() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.QrCode, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Show QR")
-                            }
-
-                            Button(
-                                onClick = { engine.stop() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Icon(Icons.Default.Stop, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Stop")
-                            }
+                        Button(
+                            onClick = { engine.stop() },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Stop", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
 
                 TransmissionState.PAUSED -> {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
                             onClick = { engine.resume() },
-                            modifier = Modifier.weight(1f).height(50.dp),
+                            modifier = Modifier.weight(1f).height(48.dp),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Resume", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Resume", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        }
+
+                        FilledTonalButton(
+                            onClick = { engine.showQr() },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Show QR", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         Button(
                             onClick = { engine.stop() },
-                            modifier = Modifier.weight(1f).height(50.dp),
+                            modifier = Modifier.weight(1f).height(48.dp),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Stop", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Stop", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }

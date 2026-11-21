@@ -57,6 +57,7 @@ class TransmissionEngine(
     private var channelsPerFrame = 4
     private var quadDim = 344
     private var activeMimoMode = "2x2"
+    private var activePacketSize = 64
 
     private var playbackJob: Job? = null
     private var transmissionStartTime = 0L
@@ -130,6 +131,7 @@ class TransmissionEngine(
         channelsPerFrame = chCount
         quadDim = qDim
         activeMimoMode = mimoMode
+        activePacketSize = packetSize
 
         _stats.value = _stats.value.copy(
             state = TransmissionState.QR_HANDSHAKE,
@@ -179,7 +181,8 @@ class TransmissionEngine(
                 val orig = if (packetIdx < totalPackets) packets[packetIdx] else packets.last()
                 val packet = Packet(orig.frameType, ch, orig.sequenceId, orig.payload, orig.version)
                 val encodedBytes = PacketEncoder.encode(packet)
-                val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim)
+                val minBytes = activePacketSize + com.example.mimo_optical_receiver.protocol.ProtocolConstants.OVERHEAD_BYTES
+                val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
                 channelMap[ch] = quadPixels
             }
             frameGenerator.renderDataInto(targetBuf, channelMap, qDim, mode)

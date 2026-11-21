@@ -198,13 +198,14 @@ class ScreenDetector {
                         val currentArea = calculatePolygonArea(trackedPoints)
 
                         if (currentArea >= minRequiredArea) {
+                            val finalCorners = smoothCorners(trackedPoints)
                             prevCornersMat?.release()
-                            prevCornersMat = nextCornersMat
+                            prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
 
                             prevGrayMat?.release()
                             prevGrayMat = grayMat.clone()
 
-                            return ScreenDetectionResult(4, trackedPoints)
+                            return ScreenDetectionResult(4, finalCorners)
                         } else {
                             resetTracking()
                         }
@@ -277,8 +278,9 @@ class ScreenDetector {
             }
 
             if (bestCorners != null) {
+                val finalCorners = smoothCorners(bestCorners)
                 prevCornersMat?.release()
-                prevCornersMat = MatOfPoint2f(*bestCorners.toTypedArray())
+                prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
 
                 prevGrayMat?.release()
                 prevGrayMat = grayMat.clone()
@@ -286,7 +288,7 @@ class ScreenDetector {
                 isTracking = true
                 trackingFrameCount = 0
 
-                return ScreenDetectionResult(4, bestCorners)
+                return ScreenDetectionResult(4, finalCorners)
             }
 
             return ScreenDetectionResult(0, emptyList())
@@ -377,14 +379,29 @@ class ScreenDetector {
             smoothedCorners = raw
             return raw
         }
-        val alpha = 0.70 // 70% current, 30% previous -> smooths micro-jitter without adding latency
+
+        // Compute maximum squared Euclidean displacement across all 4 corners
+        var maxDisplacementSq = 0.0
+        for (i in 0 until 4) {
+            val dx = raw[i].x - prev[i].x
+            val dy = raw[i].y - prev[i].y
+            val dSq = dx * dx + dy * dy
+            if (dSq > maxDisplacementSq) {
+                maxDisplacementSq = dSq
+            }
+        }
+
+        // DEADBAND: If corner micro-drift is below 3.5 px (typical handheld sensor noise),
+        // keep previous corners 100% frozen! This eliminates green box jiggling and sampling grid wobble.
+        if (maxDisplacementSq < 12.25) { // 3.5^2 = 12.25
+            return prev
+        }
+
+        // Fast-motion snap: if movement is large (> 25px, intentional camera pan/tilt), snap immediately
+        val alpha = if (maxDisplacementSq > 625.0) 1.0 else 0.40 // 40% current, 60% prev for buttery smooth tracking
         val smoothed = raw.mapIndexed { i, p ->
             val pPrev = prev[i]
-            val dx = p.x - pPrev.x
-            val dy = p.y - pPrev.y
-            // If movement is large (> 20px, intentional pan/tilt), snap immediately
-            if (dx * dx + dy * dy > 400.0) p
-            else Point(pPrev.x * (1 - alpha) + p.x * alpha, pPrev.y * (1 - alpha) + p.y * alpha)
+            Point(pPrev.x * (1.0 - alpha) + p.x * alpha, pPrev.y * (1.0 - alpha) + p.y * alpha)
         }
         smoothedCorners = smoothed
         return smoothed
