@@ -105,8 +105,8 @@ class TransmissionEngine(
             session_id = sessionId
         )
 
-        val qrPixels = qrCodeGenerator.generateQrPixels(metadata, targetSize = 280)
-        val qrFramePixels = frameGenerator.renderQrFrame(qrPixels, qrSize = 280)
+        val qrPixels = qrCodeGenerator.generateQrPixels(metadata, targetSize = 640)
+        val qrFramePixels = frameGenerator.renderQrFrame(qrPixels, qrSize = 640)
         qrBitmap = createBitmapFromPixels(qrFramePixels, frameGenerator.totalWidth, frameGenerator.totalHeight)
 
         // 3. Compute frame dimensions and layout

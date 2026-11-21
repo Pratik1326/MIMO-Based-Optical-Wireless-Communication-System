@@ -106,8 +106,8 @@ class FrameGenerator:
             -1,
         )
 
-        # Scale QR code to fit cleanly inside the white card with quiet margins (prevents warp clipping)
-        max_qr_size = min(card_width, card_height) - 96
+        # Scale QR code with clean quiet margins inside the white card (guarantees ISO quiet zone)
+        max_qr_size = min(card_width, card_height) - 48
         if max_qr_size <= 0:
             raise ValueError("frame is too small for the configured QR area")
         qr = np.asarray(qr_image, dtype=np.uint8)

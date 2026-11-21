@@ -28,8 +28,8 @@ class QrCodeGenerator {
     fun generateQrGrid(metadata: SessionMetadata, targetSize: Int = 300): Array<IntArray> {
         val json = serializeMetadata(metadata)
         val hints = mapOf(
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.L,
-            EncodeHintType.MARGIN to 2,
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.MARGIN to 1,
             EncodeHintType.CHARACTER_SET to "UTF-8"
         )
         val matrix = writer.encode(json, BarcodeFormat.QR_CODE, targetSize, targetSize, hints)

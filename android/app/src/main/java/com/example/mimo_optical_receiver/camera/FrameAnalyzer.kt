@@ -109,14 +109,15 @@ class FrameAnalyzer(
 
             // 1. ALWAYS Detect ArUco Markers & Screen Bounds (IDs 0, 1, 2, 3)
             val detectionResult = screenDetector.detect(grayMat)
-            val normalizedBounds = if (detectionResult.markerCount >= 4) {
+            val hasValidScreen = detectionResult.screenCorners.size == 4
+            val normalizedBounds = if (hasValidScreen) {
                 val frameWidth = grayMat!!.cols().toFloat()
                 val frameHeight = grayMat!!.rows().toFloat()
                 detectionResult.screenCorners.map { Pair((it.x / frameWidth).toFloat(), (it.y / frameHeight).toFloat()) }
             } else emptyList()
 
-            // 2. ALWAYS Attempt Perspective Warp if 4 corners found
-            if (detectionResult.markerCount >= 4) {
+            // 2. ALWAYS Attempt Perspective Warp if 4 corners found (works with 2, 3, or 4 markers + geometry)
+            if (hasValidScreen) {
                 warpedMat = perspectiveCorrector.correct(grayMat, detectionResult.screenCorners)
             }
 
@@ -156,11 +157,11 @@ class FrameAnalyzer(
 
                 val statusMsg = when {
                     sequenceManager != null && isLocked -> "HANDSHAKE SYNCED • Waiting for stream to start..."
-                    sequenceManager != null && !isLocked -> "HANDSHAKE SYNCED! Step back to fit screen (${detectionResult.markerCount}/4)"
+                    sequenceManager != null && !isLocked -> "HANDSHAKE SYNCED! Align camera with screen"
                     detectionResult.isObstructed -> "⚠️ VIEW OBSTRUCTED: ${detectionResult.obstructionReason ?: "Clear camera path"}"
                     isLocked -> "SCREEN LOCKED • SCANNING QR..."
-                    detectionResult.markerCount in 1..3 -> "MOVE BACK: Fit all 4 screen corners (${detectionResult.markerCount}/4)"
-                    else -> "POINT CAMERA AT SCREEN (0/4)"
+                    detectionResult.markerCount in 1..3 -> "ALIGNING: (${detectionResult.markerCount}/4 markers found)"
+                    else -> "POINT CAMERA AT SCREEN"
                 }
                 
                 onStatusUpdated(
@@ -191,8 +192,8 @@ class FrameAnalyzer(
                 val (isNew, confidence) = syncDetector.isNewFrame(warpedMat!!)
                 val needsMorePackets = sequenceManager?.isComplete() == false
 
-                // DECODE: Only decode when sync confidence is high (>= 60) to reject mid-draw screen tearing
-                if (needsMorePackets && confidence >= 60) {
+                // DECODE: Continuously decode while screen is locked and confidence >= 40 (filters mid-draw tearing)
+                if (needsMorePackets && confidence >= 40) {
                     channelMats = regionDetector.extractChannels(warpedMat!!, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channelMats, activePacketSize)
                     currentIntensities = decodeResult.intensities

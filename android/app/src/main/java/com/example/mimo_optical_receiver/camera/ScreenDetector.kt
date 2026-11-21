@@ -18,10 +18,27 @@ data class ScreenDetectionResult(
 class ScreenDetector {
     private val arucoDict: Dictionary = Aruco.getPredefinedDictionary(Aruco.DICT_4X4_50)
     
+    // Pre-allocated, high-performance detector parameters (avoids native JNI allocation churn in hot analyze() loop)
+    private val detectorParameters: DetectorParameters = DetectorParameters.create().apply {
+        set_adaptiveThreshWinSizeMin(3)
+        set_adaptiveThreshWinSizeMax(23)
+        set_adaptiveThreshWinSizeStep(10)
+        set_adaptiveThreshConstant(7.0)
+        set_polygonalApproxAccuracyRate(0.04)
+        set_errorCorrectionRate(0.8)
+        set_minMarkerPerimeterRate(0.025) // Filters out individual data matrix cells (< 100 px perimeter)
+        set_maxMarkerPerimeterRate(0.50)  // Filters out giant full-screen contours
+        set_perspectiveRemovePixelPerCell(6)
+        set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
+        set_cornerRefinementMaxIterations(15)
+        set_cornerRefinementMinAccuracy(0.05)
+    }
+
     private var prevGrayMat: Mat? = null
     private var prevCornersMat: MatOfPoint2f? = null
     private var isTracking = false
     private var trackingFrameCount = 0
+    private var smoothedCorners: List<Point>? = null
 
     fun detect(grayMat: Mat): ScreenDetectionResult {
         val totalFrameArea = grayMat.cols().toDouble() * grayMat.rows().toDouble()
@@ -35,19 +52,7 @@ class ScreenDetector {
         try {
             ids = Mat()
 
-            val parameters = DetectorParameters.create().apply {
-                set_adaptiveThreshWinSizeMin(3)
-                set_adaptiveThreshWinSizeMax(55)
-                set_adaptiveThreshWinSizeStep(6)
-                set_adaptiveThreshConstant(7.0)
-                set_polygonalApproxAccuracyRate(0.04)
-                set_errorCorrectionRate(0.8)
-                set_minMarkerPerimeterRate(0.01)
-                set_perspectiveRemovePixelPerCell(6)
-                set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
-            }
-
-            Aruco.detectMarkers(grayMat, arucoDict, corners, ids, parameters)
+            Aruco.detectMarkers(grayMat, arucoDict, corners, ids, detectorParameters)
 
             if (ids.rows() >= 2) {
                 val detectedMarkers = mutableMapOf<Int, Mat>()
@@ -131,8 +136,10 @@ class ScreenDetector {
                         val detectedArea = calculatePolygonArea(outerCorners)
 
                         if (detectedArea >= minRequiredArea) {
+                            val finalCorners = smoothCorners(outerCorners)
+
                             prevCornersMat?.release()
-                            prevCornersMat = MatOfPoint2f(*outerCorners.toTypedArray())
+                            prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
 
                             prevGrayMat?.release()
                             prevGrayMat = grayMat.clone()
@@ -140,7 +147,7 @@ class ScreenDetector {
                             isTracking = true
                             trackingFrameCount = 0
 
-                            return ScreenDetectionResult(parsedMarkers.size, outerCorners)
+                            return ScreenDetectionResult(parsedMarkers.size, finalCorners)
                         }
                     }
                 }
@@ -364,9 +371,29 @@ class ScreenDetector {
         return area
     }
 
+    private fun smoothCorners(raw: List<Point>): List<Point> {
+        val prev = smoothedCorners
+        if (prev == null || prev.size != 4 || raw.size != 4) {
+            smoothedCorners = raw
+            return raw
+        }
+        val alpha = 0.70 // 70% current, 30% previous -> smooths micro-jitter without adding latency
+        val smoothed = raw.mapIndexed { i, p ->
+            val pPrev = prev[i]
+            val dx = p.x - pPrev.x
+            val dy = p.y - pPrev.y
+            // If movement is large (> 20px, intentional pan/tilt), snap immediately
+            if (dx * dx + dy * dy > 400.0) p
+            else Point(pPrev.x * (1 - alpha) + p.x * alpha, pPrev.y * (1 - alpha) + p.y * alpha)
+        }
+        smoothedCorners = smoothed
+        return smoothed
+    }
+
     fun resetTracking() {
         isTracking = false
         trackingFrameCount = 0
+        smoothedCorners = null
         prevGrayMat?.release()
         prevGrayMat = null
         prevCornersMat?.release()

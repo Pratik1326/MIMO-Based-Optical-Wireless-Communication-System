@@ -161,20 +161,17 @@ class FrameGenerator(
             }
         }
 
-        // Center and scale QR code inside the card
+        // Center and scale QR code inside the card with clean quiet margins
         val maxQrSize = min(cardWidth, cardHeight) - 48
-        val qrScaleFactor = if (qrSize < maxQrSize) maxQrSize / qrSize else 1
-        val scaledQrSize = (qrSize * qrScaleFactor).coerceAtMost(maxQrSize)
+        val qrLeft = cardInset + (cardWidth - maxQrSize) / 2
+        val qrTop = cardInset + (cardHeight - maxQrSize) / 2
 
-        val qrLeft = cardInset + (cardWidth - scaledQrSize) / 2
-        val qrTop = cardInset + (cardHeight - scaledQrSize) / 2
-
-        for (qy in 0 until scaledQrSize) {
-            val srcY = (qy * qrSize) / scaledQrSize
+        for (qy in 0 until maxQrSize) {
+            val srcY = (qy * qrSize) / maxQrSize
             val srcRow = srcY * qrSize
             val dstRow = (qrTop + qy) * baseWidth + qrLeft
-            for (qx in 0 until scaledQrSize) {
-                val srcX = (qx * qrSize) / scaledQrSize
+            for (qx in 0 until maxQrSize) {
+                val srcX = (qx * qrSize) / maxQrSize
                 basePixels[dstRow + qx] = qrPixels[srcRow + srcX]
             }
         }
