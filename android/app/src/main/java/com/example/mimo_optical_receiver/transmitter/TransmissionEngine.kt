@@ -106,9 +106,9 @@ class TransmissionEngine(
             session_id = sessionId
         )
 
-        // 2. Generate Phase 1 QR Handshake (Pure edge-to-edge 768x768 high-contrast QR bitmap)
-        val qrPixels = qrCodeGenerator.generateQrPixels(metadata, targetSize = 768)
-        qrBitmap = createBitmapFromPixels(qrPixels, 768, 768)
+        // 2. Generate Phase 1 QR Handshake (Pure edge-to-edge 800x800 high-contrast QR bitmap)
+        val qrPixels = qrCodeGenerator.generateQrPixels(metadata, targetSize = 800)
+        qrBitmap = createBitmapFromPixels(qrPixels, 800, 800)
 
         // 3. Compute frame dimensions and layout
         val side = when (mimoMode.lowercase()) {

@@ -29,9 +29,10 @@ class ScreenDetector {
         set_minMarkerPerimeterRate(0.015) // Allows reliable detection at longer range / smaller angle
         set_maxMarkerPerimeterRate(0.60)  // Filters out giant full-screen contours
         set_perspectiveRemovePixelPerCell(6)
-        set_cornerRefinementMethod(Aruco.CORNER_REFINE_CONTOUR)
-        set_cornerRefinementMaxIterations(20)
-        set_cornerRefinementMinAccuracy(0.05)
+        set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
+        set_cornerRefinementMaxIterations(30)
+        set_cornerRefinementMinAccuracy(0.01)
+        set_cornerRefinementWinSize(5)
     }
 
     private var prevGrayMat: Mat? = null
@@ -391,14 +392,22 @@ class ScreenDetector {
             }
         }
 
-        // DEADBAND: If corner micro-drift is below 4.0 px (typical handheld sensor noise),
+        // DEADBAND: If corner micro-drift is below 5.0 px (typical handheld sensor noise),
         // keep previous corners 100% frozen! This eliminates green box jiggling and sampling grid wobble.
-        if (maxDisplacementSq < 16.0) { // 4.0^2 = 16.0
+        if (maxDisplacementSq < 25.0) { // 5.0^2 = 25.0
             return prev
         }
 
-        // Fast-motion snap: if movement is large (> 25px, intentional camera pan/tilt), snap immediately
-        val alpha = if (maxDisplacementSq > 625.0) 1.0 else 0.40 // 40% current, 60% prev for buttery smooth tracking
+        // ADAPTIVE QUADRATIC SMOOTHING: Continuous easing ramp between 5px and 30px
+        // Eliminates abrupt jump-step discontinuities that cause optical twitching
+        val disp = Math.sqrt(maxDisplacementSq)
+        val alpha = if (disp >= 30.0) {
+            1.0 // Instant snap for fast intentional camera pan/tilt
+        } else {
+            val t = (disp - 5.0) / (30.0 - 5.0)
+            0.12 + 0.73 * (t * t) // Quadratic easing: 0.12 for slow drift up to 0.85 for moderate movement
+        }
+
         val smoothed = raw.mapIndexed { i, p ->
             val pPrev = prev[i]
             Point(pPrev.x * (1.0 - alpha) + p.x * alpha, pPrev.y * (1.0 - alpha) + p.y * alpha)

@@ -182,21 +182,25 @@ fun TransmitterScreen() {
                             .padding(horizontal = 16.dp, vertical = 10.dp)
                     } else {
                         Modifier
-                            .padding(horizontal = 2.dp, vertical = 4.dp)
+                            .padding(horizontal = 0.dp, vertical = 2.dp)
                     }
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = if (!isTransmittingOrReady) Arrangement.spacedBy(16.dp) else Arrangement.spacedBy(8.dp)
         ) {
 
-            // 1. TRANSMISSION DISPLAY CANVAS (Square 1:1 Aspect Ratio, maximized)
+            // 1. TRANSMISSION DISPLAY CANVAS (Square 1:1 Aspect Ratio, maximized edge-to-edge)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(if (isTransmittingOrReady) 6.dp else 16.dp))
+                    .clip(if (isTransmittingOrReady) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(16.dp))
                     .background(Color.Black)
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(if (isTransmittingOrReady) 6.dp else 16.dp)),
+                    .border(
+                        width = if (isTransmittingOrReady) 0.dp else 1.dp,
+                        color = if (isTransmittingOrReady) Color.Transparent else Color.White.copy(alpha = 0.2f),
+                        shape = if (isTransmittingOrReady) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(16.dp)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 val bmp = currentBitmap

@@ -21,6 +21,7 @@ class FrameRenderConfig:
     grid_thickness: int = 1
     marker_size: int = 44
     marker_margin: int = 6
+    safe_zone: bool = True
 
 
 class FrameGenerator:
@@ -34,7 +35,9 @@ class FrameGenerator:
         self.anchors = ArucoAnchorGenerator(self.config.marker_size, self.config.marker_margin)
 
     def _add_safe_zone(self, frame: np.ndarray) -> np.ndarray:
-        """Adds a 10% black margin to prevent camera cutoff."""
+        """Adds a 10% black margin if enabled, otherwise returns the frame unchanged."""
+        if not self.config.safe_zone:
+            return frame
         margin = int(frame.shape[0] * 0.10)
         return cv2.copyMakeBorder(
             frame, 
