@@ -20,13 +20,13 @@ class ScreenDetector {
     
     // Pre-allocated, high-performance detector parameters (avoids native JNI allocation churn in hot analyze() loop)
     private val detectorParameters: DetectorParameters = DetectorParameters.create().apply {
-        set_adaptiveThreshWinSizeMin(3)
+        set_adaptiveThreshWinSizeMin(5)
         set_adaptiveThreshWinSizeMax(35)
-        set_adaptiveThreshWinSizeStep(8)
-        set_adaptiveThreshConstant(7.0)
+        set_adaptiveThreshWinSizeStep(4)
+        set_adaptiveThreshConstant(3.0) // 3.0 avoids threshold washout on bright OLED phone screens
         set_polygonalApproxAccuracyRate(0.05)
         set_errorCorrectionRate(0.8)
-        set_minMarkerPerimeterRate(0.015) // Allows reliable detection at longer range / smaller angle
+        set_minMarkerPerimeterRate(0.012) // Allows reliable detection at longer range / smaller angle
         set_maxMarkerPerimeterRate(0.60)  // Filters out giant full-screen contours
         set_perspectiveRemovePixelPerCell(6)
         set_cornerRefinementMethod(Aruco.CORNER_REFINE_SUBPIX)
@@ -92,10 +92,15 @@ class ScreenDetector {
                         allObserved.addAll(pair.second)
                     }
 
-                    // Project 4 outer screen corners (TL, TR, BR, BL) via RANSAC Homography
-                    var outerCorners: List<Point>? = projectOuterScreenCorners(allIdeals, allObserved)
+                    // Project 4 outer screen corners (TL, TR, BR, BL)
+                    var outerCorners: List<Point>? = null
 
-                    // Fallback: 2-Marker similarity transform if homography fails
+                    // If 3 or 4 markers are visible across the 2D plane: run RANSAC Homography
+                    if (parsedMarkers.size >= 3) {
+                        outerCorners = projectOuterScreenCorners(allIdeals, allObserved)
+                    }
+
+                    // If 2 markers visible (or homography failed): use 2-Marker similarity transform (guaranteed well-conditioned)
                     if (outerCorners == null && parsedMarkers.size >= 2) {
                         val markerList = parsedMarkers.toList()
                         val (idA, pairA) = markerList[0]
@@ -163,11 +168,12 @@ class ScreenDetector {
             corners.clear()
         }
 
-        // 2. SECONDARY FALLBACK: OPTICAL FLOW TRACKING (Bridge short momentary 1-5 frame occlusions/shakes)
+        // 2. SECONDARY FALLBACK: OPTICAL FLOW TRACKING (Persistent lock for up to 120 frames / 4 seconds)
+        // Keeps the screen locked smoothly while user holds phone, preventing lost lock & twitching
         if (isTracking && prevGrayMat != null && prevCornersMat != null) {
             trackingFrameCount++
 
-            if (trackingFrameCount > 5) {
+            if (trackingFrameCount > 120) {
                 resetTracking()
             } else {
                 val nextCornersMat = MatOfPoint2f()
@@ -198,7 +204,17 @@ class ScreenDetector {
                         val trackedPoints = nextCornersMat.toList()
                         val currentArea = calculatePolygonArea(trackedPoints)
 
-                        if (currentArea >= minRequiredArea) {
+                        // Verify tracked quad is convex and inside reasonable camera bounds
+                        val matOfPoint = MatOfPoint(*trackedPoints.toTypedArray())
+                        val isConvex = Imgproc.isContourConvex(matOfPoint)
+                        matOfPoint.release()
+
+                        val inBounds = trackedPoints.all {
+                            it.x >= -60.0 && it.x <= grayMat.cols() + 60.0 &&
+                            it.y >= -60.0 && it.y <= grayMat.rows() + 60.0
+                        }
+
+                        if (currentArea >= minRequiredArea && isConvex && inBounds) {
                             val finalCorners = smoothCorners(trackedPoints)
                             prevCornersMat?.release()
                             prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
@@ -219,11 +235,12 @@ class ScreenDetector {
                 } finally {
                     status.release()
                     err.release()
+                    nextCornersMat.release()
                 }
             }
         }
 
-        // 3. TERTIARY FALLBACK: OUTER CONTOUR WITH SYMMETRY SANITIZATION
+        // 3. TERTIARY FALLBACK: OUTER CONTOUR WITH SYMMETRY SANITIZATION (Strict full-screen filter)
         val binaryMat = Mat()
         val hierarchy = Mat()
         val contours = ArrayList<MatOfPoint>()
@@ -240,12 +257,13 @@ class ScreenDetector {
 
             var bestCorners: List<Point>? = null
             var maxArea = 0.0
+            val fullScreenMinArea = totalFrameArea * 0.10 // 10% minimum area: strictly rejects single 2x2 quadrants (~3.8%)
 
             for (contour in contours) {
                 val contour2f = MatOfPoint2f(*contour.toArray())
                 val area = Imgproc.contourArea(contour2f)
 
-                if (area >= minRequiredArea && area > maxArea) {
+                if (area >= fullScreenMinArea && area > maxArea) {
                     val peri = Imgproc.arcLength(contour2f, true)
                     val approx2f = MatOfPoint2f()
                     Imgproc.approxPolyDP(contour2f, approx2f, 0.02 * peri, true)
@@ -254,24 +272,35 @@ class ScreenDetector {
                     val approxMatOfPoint = MatOfPoint(*approxPoints.toTypedArray())
 
                     if (approxPoints.size == 4 && Imgproc.isContourConvex(approxMatOfPoint)) {
-                        maxArea = area
-                        
-                        val tl = approxPoints.minByOrNull { it.x + it.y } ?: approxPoints[0]
-                        val br = approxPoints.maxByOrNull { it.x + it.y } ?: approxPoints[0]
-                        var tr = approxPoints.maxByOrNull { it.x - it.y } ?: approxPoints[0]
-                        var bl = approxPoints.minByOrNull { it.x - it.y } ?: approxPoints[0]
-                        
-                        // SYMMETRY SANITIZATION: Prevent TR or BL corner from pulling inward when data cells flash white
-                        val topDist = distance(tl, tr)
-                        val botDist = distance(bl, br)
+                        // Aspect ratio check: screen is square (0.70 <= w/h <= 1.40)
+                        val minX = approxPoints.minOf { it.x }
+                        val maxX = approxPoints.maxOf { it.x }
+                        val minY = approxPoints.minOf { it.y }
+                        val maxY = approxPoints.maxOf { it.y }
+                        val spanW = maxX - minX
+                        val spanH = maxY - minY
+                        val aspect = if (spanH > 0) spanW / spanH else 0.0
 
-                        if (topDist < botDist * 0.82) {
-                            tr = Point(tl.x + (br.x - bl.x), tl.y + (br.y - bl.y))
+                        if (aspect in 0.70..1.40) {
+                            maxArea = area
+
+                            val tl = approxPoints.minByOrNull { it.x + it.y } ?: approxPoints[0]
+                            val br = approxPoints.maxByOrNull { it.x + it.y } ?: approxPoints[0]
+                            var tr = approxPoints.maxByOrNull { it.x - it.y } ?: approxPoints[0]
+                            var bl = approxPoints.minByOrNull { it.x - it.y } ?: approxPoints[0]
+
+                            // SYMMETRY SANITIZATION: Prevent TR or BL corner from pulling inward when data cells flash white
+                            val topDist = distance(tl, tr)
+                            val botDist = distance(bl, br)
+
+                            if (topDist < botDist * 0.82) {
+                                tr = Point(tl.x + (br.x - bl.x), tl.y + (br.y - bl.y))
+                            }
+
+                            bestCorners = listOf(tl, tr, br, bl)
                         }
-
-                        bestCorners = listOf(tl, tr, br, bl)
                     }
-                    
+
                     approx2f.release()
                     approxMatOfPoint.release()
                 }

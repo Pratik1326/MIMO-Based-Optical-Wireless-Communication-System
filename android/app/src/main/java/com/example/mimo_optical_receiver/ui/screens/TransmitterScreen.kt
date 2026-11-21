@@ -55,7 +55,7 @@ fun TransmitterScreen() {
     var selectedFileName by remember { mutableStateOf<String?>(null) }
     var selectedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var selectedMimoMode by remember { mutableStateOf("2x2") }
-    var selectedFps by remember { mutableIntStateOf(15) }
+    var selectedFps by remember { mutableIntStateOf(8) }
     var selectedPacketSize by remember { mutableIntStateOf(128) }
     var autoStartCountdown by remember { mutableIntStateOf(3) }
     var enableAutoCountdown by remember { mutableStateOf(true) }
@@ -367,7 +367,7 @@ fun TransmitterScreen() {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Stream Frame Rate", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(10, 15, 30).forEach { fps ->
+                            listOf(6, 8, 10, 15).forEach { fps ->
                                 FilterChip(
                                     selected = selectedFps == fps,
                                     onClick = {

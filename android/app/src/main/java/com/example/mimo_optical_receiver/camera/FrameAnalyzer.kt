@@ -146,10 +146,12 @@ class FrameAnalyzer(
                     val channels = regionDetector.extractChannels(warpedMat, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channels, activePacketSize)
                     val earlyPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
-                    if (earlyPackets.isNotEmpty()) {
+                    if (earlyPackets.isNotEmpty() || detectionResult.markerCount >= 2 || packetAssembler.lastMagicFound) {
                         currentMode = AnalyzerMode.DECODING_DATA
-                        DiagnosticLogger.log("ACTION", "Live optical data stream detected (${earlyPackets.size} packets). Transitioning to DECODING_DATA mode.")
-                        sequenceManager?.processPackets(earlyPackets)
+                        DiagnosticLogger.log("ACTION", "Live optical data stream detected (markers=${detectionResult.markerCount}, earlyPackets=${earlyPackets.size}). Transitioning to DECODING_DATA mode.")
+                        if (earlyPackets.isNotEmpty()) {
+                            sequenceManager?.processPackets(earlyPackets)
+                        }
                     }
                 } else if (!isLocked) {
                     qrLockedFrames = 0
