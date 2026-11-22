@@ -56,14 +56,14 @@ fun TransmitterScreen() {
     var selectedFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var selectedMimoMode by remember { mutableStateOf("2x2") }
     var selectedFps by remember { mutableIntStateOf(8) }
-    var selectedPacketSize by remember { mutableIntStateOf(128) }
-    var autoStartCountdown by remember { mutableIntStateOf(3) }
-    var enableAutoCountdown by remember { mutableStateOf(true) }
+    var selectedPacketSize by remember { mutableIntStateOf(64) }
+    var autoStartCountdown by remember { mutableIntStateOf(5) }
+    var enableAutoCountdown by remember { mutableStateOf(false) }
 
-    // Stream countdown: auto-advances to live stream in 3s for zero-wait handoff
+    // Stream countdown: auto-advances to live stream in 5s when enabled
     LaunchedEffect(stats.state, enableAutoCountdown) {
         if (stats.state == TransmissionState.QR_HANDSHAKE && enableAutoCountdown) {
-            autoStartCountdown = 3
+            autoStartCountdown = 5
             while (autoStartCountdown > 0 && enableAutoCountdown) {
                 kotlinx.coroutines.delay(1000)
                 if (enableAutoCountdown) {
@@ -396,7 +396,7 @@ fun TransmitterScreen() {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Packet Payload Size", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(64 to "64 B", 128 to "128 B", 256 to "256 B").forEach { (size, label) ->
+                            listOf(32 to "32 B (Large)", 64 to "64 B (Default)", 128 to "128 B").forEach { (size, label) ->
                                 FilterChip(
                                     selected = selectedPacketSize == size,
                                     onClick = {
@@ -414,7 +414,7 @@ fun TransmitterScreen() {
                                             }
                                         }
                                     },
-                                    label = { Text(label, fontWeight = FontWeight.Bold) },
+                                    label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -494,40 +494,52 @@ fun TransmitterScreen() {
                             }
                         }
 
+                        Button(
+                            onClick = { engine.startStreaming() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (enableAutoCountdown && autoStartCountdown > 0) "START STREAM NOW (${autoStartCountdown}s)" else "START DATA STREAM",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                fontSize = 15.sp
+                            )
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Button(
-                                onClick = { engine.startStreaming() },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    if (enableAutoCountdown && autoStartCountdown > 0) "START NOW (${autoStartCountdown}s)" else "START DATA STREAM",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black,
-                                    fontSize = 14.sp
-                                )
-                            }
-
-                            OutlinedButton(
+                            FilterChip(
+                                selected = enableAutoCountdown,
                                 onClick = {
                                     enableAutoCountdown = !enableAutoCountdown
-                                    if (enableAutoCountdown) autoStartCountdown = 3
+                                    if (enableAutoCountdown) autoStartCountdown = 5
                                 },
-                                modifier = Modifier.height(52.dp),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Icon(if (enableAutoCountdown) Icons.Default.Pause else Icons.Default.AccessTime, contentDescription = null)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (enableAutoCountdown) "Pause (${autoStartCountdown}s)" else "Timer (3s)", fontWeight = FontWeight.Bold)
-                            }
+                                leadingIcon = {
+                                    Icon(
+                                        if (enableAutoCountdown) Icons.Default.AccessTime else Icons.Default.PlayCircleOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = {
+                                    Text(if (enableAutoCountdown) "Auto-Start (5s)" else "Manual Start", fontSize = 12.sp)
+                                }
+                            )
+
+                            Text(
+                                "Align camera with QR then start",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
 
                         // MIMO Mode Quick Switch during QR Handshake

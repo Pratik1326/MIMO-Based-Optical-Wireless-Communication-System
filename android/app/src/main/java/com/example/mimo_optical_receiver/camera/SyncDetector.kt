@@ -4,8 +4,8 @@ import org.opencv.core.Core
 import org.opencv.core.Mat
 
 class SyncDetector(
-    private val settlingThreshold: Double = 26.0,
-    private val stableThreshold: Double = 18.0,
+    private val settlingThreshold: Double = 35.0,
+    private val stableThreshold: Double = 22.0,
     private val requiredSettledFrames: Int = 1
 ) {
     

@@ -91,8 +91,8 @@ class SymbolDecoder {
                 }
             }
 
-            // CONTRAST GUARDRAIL: Reject frames with collapsed dynamic range (< 45.0) to prevent all-0/all-1 noise
-            if ((sampleMax - sampleMin) < 45.0) {
+            // CONTRAST GUARDRAIL: Reject frames with collapsed dynamic range (< 35.0) to prevent all-0/all-1 noise
+            if ((sampleMax - sampleMin) < 35.0) {
                 return DecodeOutput(emptyList(), ByteArray(0), emptyList())
             }
 
@@ -134,7 +134,7 @@ class SymbolDecoder {
      * Converges in 3-5 iterations and is immune to LCD backlight falloff and glare outliers.
      */
     private fun compute2MeansThreshold(values: DoubleArray, minVal: Double, maxVal: Double): Double {
-        if (maxVal - minVal < 45.0 || values.isEmpty()) {
+        if (maxVal - minVal < 35.0 || values.isEmpty()) {
             return -1.0
         }
 
@@ -171,7 +171,7 @@ class SymbolDecoder {
         }
 
         val clusterSeparation = c1 - c0
-        if (clusterSeparation < 30.0) {
+        if (clusterSeparation < 20.0) {
             return -1.0 // Bimodal distribution separation insufficient for reliable symbol recovery
         }
 

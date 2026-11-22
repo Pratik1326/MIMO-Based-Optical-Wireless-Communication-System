@@ -194,8 +194,8 @@ class FrameAnalyzer(
                 val (isNew, confidence) = syncDetector.isNewFrame(warpedMat!!)
                 val needsMorePackets = sequenceManager?.isComplete() == false
 
-                // DECODE: Continuously decode while screen is locked and confidence >= 40 (filters mid-draw tearing)
-                if (needsMorePackets && confidence >= 40) {
+                // DECODE: Continuously decode while screen is locked and confidence >= 10 (or fresh frame)
+                if (needsMorePackets && (confidence >= 10 || isNew)) {
                     channelMats = regionDetector.extractChannels(warpedMat!!, activeMimoMode)
                     val decodeResult = symbolDecoder.decode(channelMats, activePacketSize)
                     currentIntensities = decodeResult.intensities

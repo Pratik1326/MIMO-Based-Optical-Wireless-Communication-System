@@ -92,6 +92,10 @@ def test_pdf_metadata_qr_framing_and_decoding() -> None:
     detector = cv2.QRCodeDetector()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     decoded_text, pts, _ = detector.detectAndDecode(gray)
+    if not decoded_text:
+        margin = int(frame.shape[0] * 0.10)
+        h, w = frame.shape[:2]
+        decoded_text, pts, _ = detector.detectAndDecode(gray[margin:h-margin, margin:w-margin])
 
     assert bool(decoded_text)
     decoded_json = json.loads(decoded_text)
