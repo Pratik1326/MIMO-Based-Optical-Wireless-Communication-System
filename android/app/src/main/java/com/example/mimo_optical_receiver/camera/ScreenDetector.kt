@@ -336,20 +336,32 @@ class ScreenDetector {
                         if (aspect in 0.70..1.40) {
                             maxArea = area
 
-                            val tl = approxPoints.minByOrNull { it.x + it.y } ?: approxPoints[0]
-                            val br = approxPoints.maxByOrNull { it.x + it.y } ?: approxPoints[0]
+                            var tl = approxPoints.minByOrNull { it.x + it.y } ?: approxPoints[0]
+                            var br = approxPoints.maxByOrNull { it.x + it.y } ?: approxPoints[0]
                             var tr = approxPoints.maxByOrNull { it.x - it.y } ?: approxPoints[0]
                             var bl = approxPoints.minByOrNull { it.x - it.y } ?: approxPoints[0]
 
-                            // SYMMETRY SANITIZATION: Prevent TR or BL corner from pulling inward when data cells flash white
+                            // SYMMETRY SANITIZATION: Prevent TR, BL, TL, or BR corner from pulling inward when data cells flash white
                             val topDist = distance(tl, tr)
                             val botDist = distance(bl, br)
-
-                            if (topDist < botDist * 0.82) {
+                            if (topDist < botDist * 0.80) {
                                 tr = Point(tl.x + (br.x - bl.x), tl.y + (br.y - bl.y))
+                            } else if (botDist < topDist * 0.80) {
+                                bl = Point(tl.x - (tr.x - br.x), tl.y + (br.y - tr.y))
                             }
 
-                            bestCorners = listOf(tl, tr, br, bl)
+                            val leftDist = distance(tl, bl)
+                            val rightDist = distance(tr, br)
+                            if (leftDist < rightDist * 0.80) {
+                                bl = Point(tl.x + (br.x - tr.x), tl.y + (br.y - tr.y))
+                            } else if (rightDist < leftDist * 0.80) {
+                                br = Point(tr.x + (bl.x - tl.x), tr.y + (bl.y - tl.y))
+                            }
+
+                            val candidate = listOf(tl, tr, br, bl)
+                            if (isGeometricallyValidQuad(candidate, grayMat.cols(), grayMat.rows())) {
+                                bestCorners = candidate
+                            }
                         }
                     }
 
@@ -359,7 +371,7 @@ class ScreenDetector {
                 contour2f.release()
             }
 
-            if (bestCorners != null) {
+            if (bestCorners != null && isGeometricallyValidQuad(bestCorners, grayMat.cols(), grayMat.rows())) {
                 val finalCorners = smoothCorners(bestCorners)
                 prevCornersMat?.release()
                 prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
@@ -534,7 +546,13 @@ class ScreenDetector {
         if (ratioW !in 0.75..1.35) return false
         if (ratioH !in 0.75..1.35) return false
 
-        // 5. Aspect ratio check: the screen is square (800x800)
+        // 5. Diagonal symmetry check: In a physical square screen, the two diagonals must be well-balanced (0.75 <= d1/d2 <= 1.35)
+        val diag1 = distance(corners[0], corners[2])
+        val diag2 = distance(corners[1], corners[3])
+        val ratioDiag = if (diag2 > 0) diag1 / diag2 else 0.0
+        if (ratioDiag !in 0.75..1.35) return false
+
+        // 6. Aspect ratio check: the screen is square (800x800)
         val avgW = (wTop + wBot) / 2.0
         val avgH = (hLeft + hRight) / 2.0
         val aspect = if (avgH > 0) avgW / avgH else 0.0

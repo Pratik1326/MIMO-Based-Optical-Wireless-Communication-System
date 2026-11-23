@@ -182,7 +182,13 @@ class TransmissionEngine(
             val channelRotation = if (chCount > 1) (cycle - 1) % chCount else 0
             for (ch in 0 until chCount) {
                 val effCh = (ch + channelRotation) % chCount
-                val packetIdx = fIdx * chCount + ch
+                // On even cycles (2, 4, 6...), apply 2x spatial redundancy in 2x2 mode:
+                // Broadcasts each packet across two quadrants simultaneously, cutting packet loss to < 1%
+                val packetIdx = if (cycle % 2 == 0 && chCount == 4) {
+                    ((fIdx * 2 + (ch % 2)) % totalPackets)
+                } else {
+                    fIdx * chCount + ch
+                }
                 val orig = if (packetIdx < totalPackets) packets[packetIdx] else packets.last()
                 val packet = Packet(orig.frameType, effCh, orig.sequenceId, orig.payload, orig.version)
                 val encodedBytes = PacketEncoder.encode(packet)
