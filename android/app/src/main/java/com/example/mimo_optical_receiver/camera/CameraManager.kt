@@ -141,6 +141,23 @@ fun CameraManager(
                         )
 
                         camera.cameraControl.enableTorch(false)
+
+                        // Phase 5: Ambient Illumination Adaptation & Exposure Clamping
+                        // Clamp exposure to -1.0 EV to prevent bright OLED/LCD screens from blooming/overexposing in dark rooms
+                        try {
+                            val expState = camera.cameraInfo.exposureState
+                            if (expState.isExposureCompensationSupported) {
+                                val range = expState.exposureCompensationRange
+                                val step = expState.exposureCompensationStep.toDouble()
+                                if (step > 0.0) {
+                                    val targetIndex = (-1.0 / step).toInt().coerceIn(range.lower, range.upper)
+                                    camera.cameraControl.setExposureCompensationIndex(targetIndex)
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // Non-fatal if exposure compensation is unsupported on specific hardware
+                        }
+
                         onCameraControlReady?.invoke(camera.cameraControl)
                     } catch (e: Exception) {
                         e.printStackTrace()

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import java.util.zip.Inflater
 
 class SequenceManager(
-    private val totalExpectedPackets: Int,
+    val totalExpectedPackets: Int,
     val packetSize: Int = 64
 ) {
     

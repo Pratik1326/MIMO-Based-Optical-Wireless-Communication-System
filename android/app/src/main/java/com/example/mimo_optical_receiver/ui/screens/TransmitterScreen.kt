@@ -396,7 +396,7 @@ fun TransmitterScreen() {
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Packet Payload Size", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(32 to "32 B (Large)", 64 to "64 B (Default)", 128 to "128 B").forEach { (size, label) ->
+                            listOf(32 to "32 B (Large)", 64 to "64 B (Optimal)", 128 to "128 B (Dense ≤15cm)").forEach { (size, label) ->
                                 FilterChip(
                                     selected = selectedPacketSize == size,
                                     onClick = {

@@ -225,6 +225,12 @@ class FrameAnalyzer(
                         val newCount = sequenceManager?.uniqueCount ?: 0
                         if (newCount > prevCount) {
                             lastUniquePacketFrame = frameCount
+                            val totalPkts = sequenceManager?.totalExpectedPackets ?: 0
+                            val pct = if (totalPkts > 0) (newCount * 100) / totalPkts else 0
+                            DiagnosticLogger.log(
+                                "MIMO_PROGRESS",
+                                "Progress: $newCount / $totalPkts ($pct%), Missing: ${sequenceManager?.getMissingSummary()}"
+                            )
                         }
                         if (sequenceManager?.isComplete() == true) {
                             currentMode = AnalyzerMode.COMPLETED

@@ -57,9 +57,14 @@ class SymbolDecoder {
             val cellHeight = height / gridSide.toDouble()
 
             // Adaptive center-cell guard inset:
-            // For dense grids (<10px cells such as 4x4), use 20% inset to ensure sufficient pixel light energy
-            // without edge bleed. For larger grids (1x1, 2x2), use 35% guard inset for clean margin rejection.
-            val insetFactor = if (cellWidth < 10.0) 0.20 else 0.35
+            // For dense grids (<8px cells such as 4x4), use 15% inset to maximize optical energy.
+            // For medium dense grids (8-15px cells such as 128B in 2x2), use 22% inset (360% more light energy than 35%).
+            // For large grids (>15px cells such as 1x1 or 32B), use 30% inset for clean margin rejection.
+            val insetFactor = when {
+                cellWidth < 8.0 -> 0.15
+                cellWidth < 15.0 -> 0.22
+                else -> 0.30
+            }
             val insetX = cellWidth * insetFactor
             val insetY = cellHeight * insetFactor
 
@@ -93,34 +98,88 @@ class SymbolDecoder {
                 }
             }
 
-            // CONTRAST GUARDRAIL: Adaptive threshold for dense 4x4 grids vs large 2x2/1x1 cells
-            val minAllowedDynamicRange = if (cellWidth < 10.0) 22.0 else 32.0
+            // CONTRAST GUARDRAIL: Adaptive threshold for dense grids vs large cells
+            val minAllowedDynamicRange = when {
+                cellWidth < 8.0 -> 18.0
+                cellWidth < 15.0 -> 22.0
+                else -> 28.0
+            }
             if ((sampleMax - sampleMin) < minAllowedDynamicRange) {
                 return DecodeOutput(emptyList(), ByteArray(0), emptyList())
             }
 
-            // High-precision 2-Means dynamic cluster thresholding
-            val localThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax, cellWidth)
-            if (localThreshold < 0.0) {
+            // High-precision 2-Means dynamic cluster thresholding (Global channel baseline)
+            val globalThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax, cellWidth)
+            if (globalThreshold < 0.0) {
                 // Insufficient bimodal contrast
                 return DecodeOutput(emptyList(), ByteArray(0), emptyList())
             }
             if (chIndex == 0) {
                 lastMin = sampleMin
                 lastMax = sampleMax
-                lastThreshold = localThreshold
+                lastThreshold = globalThreshold
             }
 
-            // Binarize symbols against precise data-core dynamic range for this channel
-            val chBits = ByteArray(bitsPerQuadrant)
-            for (i in cellMeans.indices) {
-                val meanVal = cellMeans[i]
-                if (i == 0) {
-                    intensities.add(meanVal)
+            // 2x2 Sub-Block Adaptive Local Thresholding:
+            // Eliminates bit flips caused by monitor angle gradients, vignette falloff, and room reflections
+            val halfSide = dataSide / 2
+            val subThresholds = DoubleArray(4) { -1.0 }
+            for (subBlock in 0 until 4) {
+                val rStart = if (subBlock >= 2) halfSide else 0
+                val rEnd = if (subBlock >= 2) dataSide else halfSide
+                val cStart = if (subBlock % 2 == 1) halfSide else 0
+                val cEnd = if (subBlock % 2 == 1) dataSide else halfSide
+
+                var subMin = 255.0
+                var subMax = 0.0
+                var subCount = 0
+                for (r in rStart until rEnd) {
+                    val rOffset = r * dataSide
+                    for (c in cStart until cEnd) {
+                        val v = cellMeans[rOffset + c]
+                        if (v < subMin) subMin = v
+                        if (v > subMax) subMax = v
+                        subCount++
+                    }
                 }
-                val bit = if (meanVal > localThreshold) 1.toByte() else 0.toByte()
-                chBits[i] = bit
-                allBits.add(bit)
+
+                if (subCount > 0 && (subMax - subMin) >= minAllowedDynamicRange) {
+                    val subValues = DoubleArray(subCount)
+                    var idx = 0
+                    for (r in rStart until rEnd) {
+                        val rOffset = r * dataSide
+                        for (c in cStart until cEnd) {
+                            subValues[idx++] = cellMeans[rOffset + c]
+                        }
+                    }
+                    val st = compute2MeansThreshold(subValues, subMin, subMax, cellWidth)
+                    if (st > 0.0) subThresholds[subBlock] = st
+                }
+            }
+
+            // Binarize symbols using local sub-block threshold with global fallback
+            val chBits = ByteArray(bitsPerQuadrant)
+            for (r in 0 until dataSide) {
+                val rSub = if (r >= halfSide) 2 else 0
+                val rOffset = r * dataSide
+                for (c in 0 until dataSide) {
+                    val cSub = if (c >= halfSide) 1 else 0
+                    val subBlockIdx = rSub + cSub
+                    val effectiveThreshold = if (subThresholds[subBlockIdx] > 0.0) {
+                        subThresholds[subBlockIdx]
+                    } else {
+                        globalThreshold
+                    }
+
+                    val cellPos = rOffset + c
+                    val meanVal = cellMeans[cellPos]
+                    if (cellPos == 0) {
+                        intensities.add(meanVal)
+                    }
+                    val bit = if (meanVal > effectiveThreshold) 1.toByte() else 0.toByte()
+                    chBits[cellPos] = bit
+                    allBits.add(bit)
+                }
             }
             channelBitsList.add(chBits)
         }
@@ -137,7 +196,11 @@ class SymbolDecoder {
      * Converges in 3-5 iterations and is immune to LCD backlight falloff and glare outliers.
      */
     private fun compute2MeansThreshold(values: DoubleArray, minVal: Double, maxVal: Double, cellWidth: Double = 15.0): Double {
-        val minDynRange = if (cellWidth < 10.0) 22.0 else 32.0
+        val minDynRange = when {
+            cellWidth < 8.0 -> 18.0
+            cellWidth < 15.0 -> 22.0
+            else -> 28.0
+        }
         if (maxVal - minVal < minDynRange || values.isEmpty()) {
             return -1.0
         }
@@ -175,7 +238,11 @@ class SymbolDecoder {
         }
 
         val clusterSeparation = c1 - c0
-        val minSeparation = if (cellWidth < 10.0) 14.0 else 18.0
+        val minSeparation = when {
+            cellWidth < 8.0 -> 10.0
+            cellWidth < 15.0 -> 13.0
+            else -> 16.0
+        }
         if (clusterSeparation < minSeparation) {
             return -1.0 // Bimodal distribution separation insufficient for reliable symbol recovery
         }

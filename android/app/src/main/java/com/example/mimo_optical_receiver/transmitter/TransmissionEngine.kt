@@ -174,23 +174,28 @@ class TransmissionEngine(
         )
         val channelMap = mutableMapOf<Int, IntArray>()
 
-        fun renderFrame(fIdx: Int, targetBuf: IntArray): Bitmap {
+        // Phase 4: Spatial Diversity Rotation (Cyclic Quadrant Permutation)
+        // Permutes channel mappings every cycle so packets rotate across all quadrants.
+        // Even if a quadrant is occluded by glare or notifications, packets shift to clear quadrants in subsequent cycles.
+        fun renderFrame(fIdx: Int, targetBuf: IntArray, cycle: Int): Bitmap {
             channelMap.clear()
+            val channelRotation = if (chCount > 1) (cycle - 1) % chCount else 0
             for (ch in 0 until chCount) {
+                val effCh = (ch + channelRotation) % chCount
                 val packetIdx = fIdx * chCount + ch
                 val orig = if (packetIdx < totalPackets) packets[packetIdx] else packets.last()
-                val packet = Packet(orig.frameType, ch, orig.sequenceId, orig.payload, orig.version)
+                val packet = Packet(orig.frameType, effCh, orig.sequenceId, orig.payload, orig.version)
                 val encodedBytes = PacketEncoder.encode(packet)
                 val minBytes = activePacketSize + com.example.mimo_optical_receiver.protocol.ProtocolConstants.OVERHEAD_BYTES
                 val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
-                channelMap[ch] = quadPixels
+                channelMap[effCh] = quadPixels
             }
             frameGenerator.renderDataInto(targetBuf, channelMap, qDim, mode)
             return Bitmap.createBitmap(targetBuf, totalW, totalH, Bitmap.Config.ARGB_8888)
         }
 
-        // Immediately emit Frame 0
-        _currentBitmap.value = renderFrame(0, bufferPool[0])
+        // Immediately emit Frame 0 (Cycle 1)
+        _currentBitmap.value = renderFrame(0, bufferPool[0], 1)
 
         playbackJob = scope.launch(Dispatchers.Default) {
             var frameIdx = 0
@@ -198,7 +203,7 @@ class TransmissionEngine(
 
             while (isActive) {
                 val buf = bufferPool[frameIdx % 2]
-                val bmp = renderFrame(frameIdx, buf)
+                val bmp = renderFrame(frameIdx, buf, cycle)
                 _currentBitmap.value = bmp
 
                 // Update transmission statistics

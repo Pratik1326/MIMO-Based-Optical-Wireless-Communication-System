@@ -270,11 +270,13 @@ fun ScannerScreen() {
                         ((validCount * packetSize) / 1024.0) / elapsedSec
                     } else 0.0
 
-                    // Only declare stream stalled if NO frames (neither unique nor duplicate) arrive for > 6 seconds
+                    // Only declare stream stalled if NO frames arrive for > 8 seconds AND screen tracking is lost (!locked).
+                    // If 4/4 ArUco markers are locked, camera is properly aligned -> suppress false yellow card stall alarm!
                     val isStalled = (uiState.currentState == "RECEIVING_DATA" || uiState.currentState == "STALLED") &&
                             validCount > 0 &&
                             validCount < uiState.qrTotalPackets &&
-                            (now - lastPacketTimestamp > 6000L)
+                            (now - lastPacketTimestamp > 8000L) &&
+                            !locked
 
                     val nextState = when {
                         uiState.currentState == "TRANSFER_COMPLETE" -> "TRANSFER_COMPLETE"
