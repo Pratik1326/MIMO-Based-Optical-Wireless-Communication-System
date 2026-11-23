@@ -70,6 +70,7 @@ fun ScannerScreen() {
     var lastSavedRecord by remember { mutableStateOf<TransferRecord?>(null) }
     var showDiagnosticsSheet by remember { mutableStateOf(false) }
     var lastValidCount by remember { mutableIntStateOf(0) }
+    var lastAnyPacketCount by remember { mutableIntStateOf(0) }
     var receptionStartTime by remember { mutableLongStateOf(0L) }
     var lastPacketTimestamp by remember { mutableLongStateOf(0L) }
 
@@ -253,11 +254,13 @@ fun ScannerScreen() {
                     } else null
 
                     val now = System.currentTimeMillis()
-                    if (validCount > lastValidCount) {
+                    val totalDecoded = validCount + duplicateCount
+                    if (totalDecoded > lastAnyPacketCount) {
                         if (receptionStartTime == 0L) {
                             receptionStartTime = now
                         }
                         lastPacketTimestamp = now
+                        lastAnyPacketCount = totalDecoded
                         lastValidCount = validCount
                     }
 
@@ -267,10 +270,11 @@ fun ScannerScreen() {
                         ((validCount * packetSize) / 1024.0) / elapsedSec
                     } else 0.0
 
+                    // Only declare stream stalled if NO frames (neither unique nor duplicate) arrive for > 6 seconds
                     val isStalled = (uiState.currentState == "RECEIVING_DATA" || uiState.currentState == "STALLED") &&
                             validCount > 0 &&
                             validCount < uiState.qrTotalPackets &&
-                            (now - lastPacketTimestamp > 3500L)
+                            (now - lastPacketTimestamp > 6000L)
 
                     val nextState = when {
                         uiState.currentState == "TRANSFER_COMPLETE" -> "TRANSFER_COMPLETE"
@@ -357,6 +361,7 @@ fun ScannerScreen() {
                     analyzerMode = FrameAnalyzer.AnalyzerMode.SCANNING_QR
                     lastSavedRecord = null
                     lastValidCount = 0
+                    lastAnyPacketCount = 0
                     receptionStartTime = 0L
                     lastPacketTimestamp = 0L
                     uiState = uiState.copy(

@@ -50,14 +50,14 @@ class ScreenDetector {
 
         // 1. ULTRA-FAST OPTICAL FLOW FAST-PATH (When already locked on screen)
         // Runs in ~2-4 ms instead of 300ms Aruco.detectMarkers, boosting camera FPS from 2.3 to 25+ FPS!
-        // Runs full ArUco re-anchoring once every 8 frames to eliminate cumulative drift.
-        if (isTracking && prevGrayMat != null && prevCornersMat != null && (arucoReanchorInterval % 8 != 0)) {
+        // Re-anchors with ArUco every 3 frames (instead of 8) to eliminate cumulative aperture drift.
+        if (isTracking && prevGrayMat != null && prevCornersMat != null && (arucoReanchorInterval % 3 != 0)) {
             val nextCornersMat = MatOfPoint2f()
             val status = MatOfByte()
             val err = MatOfFloat()
 
             try {
-                val winSize = Size(31.0, 31.0)
+                val winSize = Size(21.0, 21.0)
                 val maxLevel = 3
                 val criteria = TermCriteria(TermCriteria.EPS or TermCriteria.COUNT, 20, 0.03)
 
@@ -80,16 +80,8 @@ class ScreenDetector {
                     val trackedPoints = nextCornersMat.toList()
                     val currentArea = calculatePolygonArea(trackedPoints)
 
-                    val matOfPoint = MatOfPoint(*trackedPoints.toTypedArray())
-                    val isConvex = Imgproc.isContourConvex(matOfPoint)
-                    matOfPoint.release()
-
-                    val inBounds = trackedPoints.all {
-                        it.x >= -60.0 && it.x <= grayMat.cols() + 60.0 &&
-                        it.y >= -60.0 && it.y <= grayMat.rows() + 60.0
-                    }
-
-                    if (currentArea >= minRequiredArea && isConvex && inBounds) {
+                    // HARD GEOMETRIC SANITY GUARD: Rejects trapezoid skew and escaped corner points
+                    if (currentArea >= minRequiredArea && isGeometricallyValidQuad(trackedPoints, grayMat.cols(), grayMat.rows())) {
                         val finalCorners = smoothCorners(trackedPoints)
                         prevCornersMat?.release()
                         prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
@@ -98,10 +90,15 @@ class ScreenDetector {
                         prevGrayMat = grayMat.clone()
 
                         return ScreenDetectionResult(4, finalCorners)
+                    } else {
+                        // Immediately drop tracking if optical flow drifted or distorted
+                        resetTracking()
                     }
+                } else {
+                    resetTracking()
                 }
             } catch (e: Exception) {
-                // Fall through to primary ArUco detection on exception
+                resetTracking()
             } finally {
                 status.release()
                 err.release()
@@ -205,7 +202,7 @@ class ScreenDetector {
                     if (outerCorners != null && outerCorners.size == 4) {
                         val detectedArea = calculatePolygonArea(outerCorners)
 
-                        if (detectedArea >= minRequiredArea) {
+                        if (detectedArea >= minRequiredArea && isGeometricallyValidQuad(outerCorners, grayMat.cols(), grayMat.rows())) {
                             val finalCorners = smoothCorners(outerCorners)
 
                             prevCornersMat?.release()
@@ -232,12 +229,12 @@ class ScreenDetector {
             corners.clear()
         }
 
-        // 2. SECONDARY FALLBACK: OPTICAL FLOW TRACKING (Persistent lock for up to 120 frames / 4 seconds)
+        // 2. SECONDARY FALLBACK: OPTICAL FLOW TRACKING (Limited to 6 frames / ~200ms to eliminate drift)
         // Keeps the screen locked smoothly while user holds phone, preventing lost lock & twitching
         if (isTracking && prevGrayMat != null && prevCornersMat != null) {
             trackingFrameCount++
 
-            if (trackingFrameCount > 120) {
+            if (trackingFrameCount > 6) {
                 resetTracking()
             } else {
                 val nextCornersMat = MatOfPoint2f()
@@ -245,7 +242,7 @@ class ScreenDetector {
                 val err = MatOfFloat()
 
                 try {
-                    val winSize = Size(31.0, 31.0)
+                    val winSize = Size(21.0, 21.0)
                     val maxLevel = 3
                     val criteria = TermCriteria(TermCriteria.EPS or TermCriteria.COUNT, 20, 0.03)
 
@@ -268,17 +265,8 @@ class ScreenDetector {
                         val trackedPoints = nextCornersMat.toList()
                         val currentArea = calculatePolygonArea(trackedPoints)
 
-                        // Verify tracked quad is convex and inside reasonable camera bounds
-                        val matOfPoint = MatOfPoint(*trackedPoints.toTypedArray())
-                        val isConvex = Imgproc.isContourConvex(matOfPoint)
-                        matOfPoint.release()
-
-                        val inBounds = trackedPoints.all {
-                            it.x >= -60.0 && it.x <= grayMat.cols() + 60.0 &&
-                            it.y >= -60.0 && it.y <= grayMat.rows() + 60.0
-                        }
-
-                        if (currentArea >= minRequiredArea && isConvex && inBounds) {
+                        // HARD GEOMETRIC SANITY GUARD: Rejects trapezoid skew and escaped corner points
+                        if (currentArea >= minRequiredArea && isGeometricallyValidQuad(trackedPoints, grayMat.cols(), grayMat.rows())) {
                             val finalCorners = smoothCorners(trackedPoints)
                             prevCornersMat?.release()
                             prevCornersMat = MatOfPoint2f(*finalCorners.toTypedArray())
@@ -507,6 +495,52 @@ class ScreenDetector {
         }
         smoothedCorners = smoothed
         return smoothed
+    }
+
+    /**
+     * Strict physical geometry validator to prevent optical flow trapezoid skew.
+     * Enforces camera bounds, convexity, side-length minimums, trapezoid symmetry, and aspect ratio.
+     */
+    private fun isGeometricallyValidQuad(corners: List<Point>, imgCols: Int, imgRows: Int): Boolean {
+        if (corners.size != 4) return false
+
+        // 1. Camera image bounds: corners cannot escape into arbitrary space
+        val margin = 25.0
+        val inBounds = corners.all {
+            it.x >= -margin && it.x <= imgCols + margin &&
+            it.y >= -margin && it.y <= imgRows + margin
+        }
+        if (!inBounds) return false
+
+        // 2. Convexity: quad must be strictly convex
+        val matOfPoint = MatOfPoint(*corners.toTypedArray())
+        val isConvex = Imgproc.isContourConvex(matOfPoint)
+        matOfPoint.release()
+        if (!isConvex) return false
+
+        // 3. Side lengths: TL(0), TR(1), BR(2), BL(3)
+        val wTop = distance(corners[0], corners[1])
+        val wBot = distance(corners[3], corners[2])
+        val hLeft = distance(corners[0], corners[3])
+        val hRight = distance(corners[1], corners[2])
+
+        if (wTop < 30.0 || wBot < 30.0 || hLeft < 30.0 || hRight < 30.0) return false
+
+        // 4. Trapezoid ratio bounds: Width Bot/Top and Height Right/Left must be within [0.75 .. 1.35]
+        // Under realistic phone-to-phone tilt (up to 45 degrees), perspective foreshortening
+        // cannot cause bot/top width ratio to exceed 1.35 or drop below 0.75
+        val ratioW = wBot / wTop
+        val ratioH = hRight / hLeft
+        if (ratioW !in 0.75..1.35) return false
+        if (ratioH !in 0.75..1.35) return false
+
+        // 5. Aspect ratio check: the screen is square (800x800)
+        val avgW = (wTop + wBot) / 2.0
+        val avgH = (hLeft + hRight) / 2.0
+        val aspect = if (avgH > 0) avgW / avgH else 0.0
+        if (aspect !in 0.70..1.40) return false
+
+        return true
     }
 
     fun resetTracking() {

@@ -56,10 +56,12 @@ class SymbolDecoder {
             val cellWidth = width / gridSide.toDouble()
             val cellHeight = height / gridSide.toDouble()
 
-            // High-precision center-cell core sampling: 35% guard inset on all 4 sides of each cell
-            // Samples the tight central 30% core to eliminate optical blur, tilt skew, and neighboring cell bleed
-            val insetX = cellWidth * 0.35
-            val insetY = cellHeight * 0.35
+            // Adaptive center-cell guard inset:
+            // For dense grids (<10px cells such as 4x4), use 20% inset to ensure sufficient pixel light energy
+            // without edge bleed. For larger grids (1x1, 2x2), use 35% guard inset for clean margin rejection.
+            val insetFactor = if (cellWidth < 10.0) 0.20 else 0.35
+            val insetX = cellWidth * insetFactor
+            val insetY = cellHeight * insetFactor
 
             var sampleMin = 255.0
             var sampleMax = 0.0
@@ -91,15 +93,16 @@ class SymbolDecoder {
                 }
             }
 
-            // CONTRAST GUARDRAIL: Reject frames with collapsed dynamic range (< 35.0) to prevent all-0/all-1 noise
-            if ((sampleMax - sampleMin) < 35.0) {
+            // CONTRAST GUARDRAIL: Adaptive threshold for dense 4x4 grids vs large 2x2/1x1 cells
+            val minAllowedDynamicRange = if (cellWidth < 10.0) 22.0 else 32.0
+            if ((sampleMax - sampleMin) < minAllowedDynamicRange) {
                 return DecodeOutput(emptyList(), ByteArray(0), emptyList())
             }
 
             // High-precision 2-Means dynamic cluster thresholding
-            val localThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax)
+            val localThreshold = compute2MeansThreshold(cellMeans, sampleMin, sampleMax, cellWidth)
             if (localThreshold < 0.0) {
-                // Insufficient bimodal contrast (< 30.0 separation between black and white clusters)
+                // Insufficient bimodal contrast
                 return DecodeOutput(emptyList(), ByteArray(0), emptyList())
             }
             if (chIndex == 0) {
@@ -133,8 +136,9 @@ class SymbolDecoder {
      * 2-Means clustering to find the optimal decision boundary between 0 and 1 symbols.
      * Converges in 3-5 iterations and is immune to LCD backlight falloff and glare outliers.
      */
-    private fun compute2MeansThreshold(values: DoubleArray, minVal: Double, maxVal: Double): Double {
-        if (maxVal - minVal < 35.0 || values.isEmpty()) {
+    private fun compute2MeansThreshold(values: DoubleArray, minVal: Double, maxVal: Double, cellWidth: Double = 15.0): Double {
+        val minDynRange = if (cellWidth < 10.0) 22.0 else 32.0
+        if (maxVal - minVal < minDynRange || values.isEmpty()) {
             return -1.0
         }
 
@@ -171,7 +175,8 @@ class SymbolDecoder {
         }
 
         val clusterSeparation = c1 - c0
-        if (clusterSeparation < 20.0) {
+        val minSeparation = if (cellWidth < 10.0) 14.0 else 18.0
+        if (clusterSeparation < minSeparation) {
             return -1.0 // Bimodal distribution separation insufficient for reliable symbol recovery
         }
 

@@ -26,6 +26,7 @@ class FrameAnalyzer(
     private var frameCount = 0
     private var lastFpsTimestamp = System.currentTimeMillis()
     private var lastUniquePacketFrame = 0
+    private var lastValidPacketFrame = 0
     private var lastNackTimestamp = 0L
     private var qrLockedFrames = 0
     
@@ -62,6 +63,7 @@ class FrameAnalyzer(
         qrLockedFrames = 0
         frameCount = 0
         lastUniquePacketFrame = 0
+        lastValidPacketFrame = 0
         currentMode = AnalyzerMode.SCANNING_QR
         syncDetector.release()
         screenDetector.resetTracking()
@@ -217,6 +219,7 @@ class FrameAnalyzer(
                     )
 
                     if (validPackets.isNotEmpty()) {
+                        lastValidPacketFrame = frameCount
                         val prevCount = sequenceManager?.uniqueCount ?: 0
                         sequenceManager?.processPackets(validPackets)
                         val newCount = sequenceManager?.uniqueCount ?: 0
@@ -229,12 +232,13 @@ class FrameAnalyzer(
                         }
                     }
 
-                    // ARQ NACK Retransmit: if locked and expecting packets, but stalled for 40 frames (~1.5-2.5s)
-                    if (needsMorePackets && (frameCount - lastUniquePacketFrame) >= 40 && (sequenceManager?.uniqueCount ?: 0) > 0) {
+                    // ARQ NACK Retransmit: only trigger stall if NO valid packets of any kind (new or duplicate) have arrived for >= 150 frames (~5-6s)
+                    // This completely eliminates false yellow-card stalls during carousel repeat cycles!
+                    if (needsMorePackets && (frameCount - lastValidPacketFrame) >= 150 && (sequenceManager?.uniqueCount ?: 0) > 0) {
                         val nowMs = System.currentTimeMillis()
-                        if (nowMs - lastNackTimestamp >= 2500L) {
+                        if (nowMs - lastNackTimestamp >= 4000L) {
                             lastNackTimestamp = nowMs
-                            lastUniquePacketFrame = frameCount
+                            lastValidPacketFrame = frameCount
                             onRetransmitRequested?.invoke()
                         }
                     }
