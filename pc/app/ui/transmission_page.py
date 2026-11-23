@@ -272,22 +272,31 @@ class TransmissionPage(QWidget):
             # so packets never get permanently trapped in a glare-affected or blurred quadrant!
             channel_rotation = self.carousel_cycle % self.mimo_layout.channel_count
 
-            if stride == 2 and self.mimo_layout.channel_count == 4:
-                # 2x Redundancy mode (Channels 0, 1 = current packets; Channels 2, 3 = previous packets)
-                prev_pos = (packet_position - 2) % len(self.packets)
+            if stride in (2, 3) and self.mimo_layout.channel_count == 4:
+                # 3:1 Dynamic Rolling Pipeline (3 new packets + 1 rotating repeat packet)
+                repeat_q = (self.frame_count + self.carousel_cycle) % 4
+                prev_pos = (packet_position - 3) % len(self.packets)
                 packet_indices = [
                     packet_position % len(self.packets),
                     (packet_position + 1) % len(self.packets),
-                    prev_pos % len(self.packets),
-                    (prev_pos + 1) % len(self.packets),
+                    (packet_position + 2) % len(self.packets),
                 ]
-                for channel_id, p_idx in enumerate(packet_indices):
-                    eff_ch = (channel_id + channel_rotation) % self.mimo_layout.channel_count
+                active_channels = [c for c in range(4) if c != repeat_q]
+                for idx, c in enumerate(active_channels):
+                    p_idx = packet_indices[idx]
+                    eff_ch = (c + channel_rotation) % 4
                     mat = self._packet_matrix_cache.get((p_idx, eff_ch))
                     if mat is None:
                         p = replace(self.packets[p_idx], channel_id=eff_ch)
                         mat = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
                     matrices[eff_ch] = mat
+                # Redundant channel (Rotating immediate 2nd chance)
+                eff_rep_ch = (repeat_q + channel_rotation) % 4
+                mat_rep = self._packet_matrix_cache.get((prev_pos, eff_rep_ch))
+                if mat_rep is None:
+                    p = replace(self.packets[prev_pos], channel_id=eff_rep_ch)
+                    mat_rep = self.encoder.encode(p.to_bytes(), SymbolMode.BINARY, min_bytes=min_bytes)
+                matrices[eff_rep_ch] = mat_rep
             else:
                 for channel_id in range(self.mimo_layout.channel_count):
                     p_idx = (packet_position + channel_id) % len(self.packets)

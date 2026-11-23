@@ -118,7 +118,16 @@ class TransmissionEngine(
             else -> 1
         }
         val chCount = side * side
-        val framesCount = (totalPackets + chCount - 1) / chCount
+        // Dynamic Rolling Pipeline:
+        // In 2x2 mode: 3 new packets + 1 rotating repeat packet per frame (3:1 ratio)
+        // In 4x4 mode: 12 new packets + 4 rotating repeat packets per frame (12:4 ratio)
+        // In 1x1 mode: 1 packet per frame
+        val newPacketsPerFrame = when (chCount) {
+            4 -> 3
+            16 -> 12
+            else -> 1
+        }
+        val framesCount = (totalPackets + newPacketsPerFrame - 1) / newPacketsPerFrame
         val qDim = when (side) {
             1 -> 688
             2 -> 344
@@ -174,28 +183,75 @@ class TransmissionEngine(
         )
         val channelMap = mutableMapOf<Int, IntArray>()
 
-        // Phase 4: Spatial Diversity Rotation (Cyclic Quadrant Permutation)
-        // Permutes channel mappings every cycle so packets rotate across all quadrants.
-        // Even if a quadrant is occluded by glare or notifications, packets shift to clear quadrants in subsequent cycles.
+        // Phase 4: Dynamic Rolling Pipeline & Spatial Diversity Rotation
+        // In 2x2 mode: 3 new packets + 1 rotating repeat quadrant per frame (3:1 ratio).
+        // The redundant quadrant rotates across all 4 positions every frame, giving immediate second chances within 125ms!
+        // In 4x4 mode: 12 new packets + 4 rotating repeat quadrants per frame (12:4 ratio).
+        // In 1x1 mode: Linear on Cycle 1, Coprime Stride on Cycle 2+ to break burst drop clusters.
         fun renderFrame(fIdx: Int, targetBuf: IntArray, cycle: Int): Bitmap {
             channelMap.clear()
-            val channelRotation = if (chCount > 1) (cycle - 1) % chCount else 0
-            for (ch in 0 until chCount) {
-                val effCh = (ch + channelRotation) % chCount
-                // On even cycles (2, 4, 6...), apply 2x spatial redundancy in 2x2 mode:
-                // Broadcasts each packet across two quadrants simultaneously, cutting packet loss to < 1%
-                val packetIdx = if (cycle % 2 == 0 && chCount == 4) {
-                    ((fIdx * 2 + (ch % 2)) % totalPackets)
-                } else {
-                    fIdx * chCount + ch
+            val minBytes = activePacketSize + com.example.mimo_optical_receiver.protocol.ProtocolConstants.OVERHEAD_BYTES
+
+            when (chCount) {
+                4 -> {
+                    // 3:1 Dynamic Rolling Pipeline with Rotating Redundant Quadrant
+                    val newPerFrame = 3
+                    val basePacketIdx = (fIdx * newPerFrame + (cycle - 1) * 7) % totalPackets
+                    val repeatQuadrant = (fIdx + (cycle - 1)) % 4
+                    val repeatPacketIdx = (basePacketIdx - newPerFrame + totalPackets) % totalPackets
+
+                    val activeQuadrants = (0 until 4).filter { it != repeatQuadrant }
+                    for (i in 0 until 3) {
+                        val q = activeQuadrants[i]
+                        val pIdx = (basePacketIdx + i) % totalPackets
+                        val orig = if (pIdx < totalPackets) packets[pIdx] else packets.last()
+                        val packet = Packet(orig.frameType, q, orig.sequenceId, orig.payload, orig.version)
+                        val encodedBytes = PacketEncoder.encode(packet)
+                        channelMap[q] = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
+                    }
+
+                    // Rotating Redundant Quadrant: Immediate 2nd chance on a different quadrant
+                    val origRep = if (repeatPacketIdx < totalPackets) packets[repeatPacketIdx] else packets.last()
+                    val repPacket = Packet(origRep.frameType, repeatQuadrant, origRep.sequenceId, origRep.payload, origRep.version)
+                    val repBytes = PacketEncoder.encode(repPacket)
+                    channelMap[repeatQuadrant] = symbolEncoder.encodeToPixels(repBytes, targetSize = qDim, minBytes = minBytes)
                 }
-                val orig = if (packetIdx < totalPackets) packets[packetIdx] else packets.last()
-                val packet = Packet(orig.frameType, effCh, orig.sequenceId, orig.payload, orig.version)
-                val encodedBytes = PacketEncoder.encode(packet)
-                val minBytes = activePacketSize + com.example.mimo_optical_receiver.protocol.ProtocolConstants.OVERHEAD_BYTES
-                val quadPixels = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
-                channelMap[effCh] = quadPixels
+                16 -> {
+                    // 12:4 Dynamic Rolling Pipeline for 4x4 MIMO
+                    val newPerFrame = 12
+                    val basePacketIdx = (fIdx * newPerFrame + (cycle - 1) * 11) % totalPackets
+                    val repeatBlock = (fIdx + (cycle - 1)) % 4
+                    val repeatQuadrants = (repeatBlock * 4 until (repeatBlock + 1) * 4).toSet()
+                    val activeQuadrants = (0 until 16).filter { it !in repeatQuadrants }
+
+                    for (i in 0 until 12) {
+                        val q = activeQuadrants[i]
+                        val pIdx = (basePacketIdx + i) % totalPackets
+                        val orig = if (pIdx < totalPackets) packets[pIdx] else packets.last()
+                        val packet = Packet(orig.frameType, q, orig.sequenceId, orig.payload, orig.version)
+                        val encodedBytes = PacketEncoder.encode(packet)
+                        channelMap[q] = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
+                    }
+
+                    for (i in 0 until 4) {
+                        val q = (repeatBlock * 4) + i
+                        val repIdx = (basePacketIdx - newPerFrame + i + totalPackets) % totalPackets
+                        val origRep = if (repIdx < totalPackets) packets[repIdx] else packets.last()
+                        val repPacket = Packet(origRep.frameType, q, origRep.sequenceId, origRep.payload, origRep.version)
+                        val repBytes = PacketEncoder.encode(repPacket)
+                        channelMap[q] = symbolEncoder.encodeToPixels(repBytes, targetSize = qDim, minBytes = minBytes)
+                    }
+                }
+                else -> {
+                    // 1x1 Mode: Forward on Cycle 1, Coprime Stride on Cycle 2+ to prevent consecutive packet drops
+                    val pIdx = if (cycle == 1) fIdx % totalPackets else (fIdx * 7 + (cycle - 1) * 5) % totalPackets
+                    val orig = if (pIdx < totalPackets) packets[pIdx] else packets.last()
+                    val packet = Packet(orig.frameType, 0, orig.sequenceId, orig.payload, orig.version)
+                    val encodedBytes = PacketEncoder.encode(packet)
+                    channelMap[0] = symbolEncoder.encodeToPixels(encodedBytes, targetSize = qDim, minBytes = minBytes)
+                }
             }
+
             frameGenerator.renderDataInto(targetBuf, channelMap, qDim, mode)
             return Bitmap.createBitmap(targetBuf, totalW, totalH, Bitmap.Config.ARGB_8888)
         }

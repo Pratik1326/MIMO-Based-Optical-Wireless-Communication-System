@@ -311,17 +311,7 @@ fun TransmitterScreen() {
                                         val sampleBytes = sampleText.toByteArray(Charsets.UTF_8)
                                         selectedFileName = "demo_sample.txt"
                                         selectedFileBytes = sampleBytes
-                                        Toast.makeText(context, "Loaded demo sample (140B)", Toast.LENGTH_SHORT).show()
-                                        // Auto-generate dynamic Phase 1 QR Handshake immediately on demo sample load
-                                        coroutineScope.launch {
-                                            engine.prepare(
-                                                data = sampleBytes,
-                                                filename = "demo_sample.txt",
-                                                mimoMode = selectedMimoMode,
-                                                targetFps = selectedFps,
-                                                packetSize = selectedPacketSize
-                                            )
-                                        }
+                                        Toast.makeText(context, "Loaded demo sample (140B). Tap PREPARE to generate stream.", Toast.LENGTH_SHORT).show()
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(10.dp)
@@ -341,21 +331,7 @@ fun TransmitterScreen() {
                             listOf("1x1", "2x2", "4x4").forEach { mode ->
                                 FilterChip(
                                     selected = selectedMimoMode == mode,
-                                    onClick = {
-                                        selectedMimoMode = mode
-                                        val bytes = selectedFileBytes
-                                        if (bytes != null && bytes.isNotEmpty()) {
-                                            coroutineScope.launch {
-                                                engine.prepare(
-                                                    data = bytes,
-                                                    filename = selectedFileName ?: "transmission.bin",
-                                                    mimoMode = mode,
-                                                    targetFps = selectedFps,
-                                                    packetSize = selectedPacketSize
-                                                )
-                                            }
-                                        }
-                                    },
+                                    onClick = { selectedMimoMode = mode },
                                     label = { Text(mode, fontWeight = FontWeight.Bold) },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -370,21 +346,7 @@ fun TransmitterScreen() {
                             listOf(6, 8, 10, 15).forEach { fps ->
                                 FilterChip(
                                     selected = selectedFps == fps,
-                                    onClick = {
-                                        selectedFps = fps
-                                        val bytes = selectedFileBytes
-                                        if (bytes != null && bytes.isNotEmpty()) {
-                                            coroutineScope.launch {
-                                                engine.prepare(
-                                                    data = bytes,
-                                                    filename = selectedFileName ?: "transmission.bin",
-                                                    mimoMode = selectedMimoMode,
-                                                    targetFps = fps,
-                                                    packetSize = selectedPacketSize
-                                                )
-                                            }
-                                        }
-                                    },
+                                    onClick = { selectedFps = fps },
                                     label = { Text("$fps FPS", fontWeight = FontWeight.Bold) },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -399,21 +361,7 @@ fun TransmitterScreen() {
                             listOf(32 to "32 B (Large)", 64 to "64 B (Optimal)", 128 to "128 B (Dense ≤15cm)").forEach { (size, label) ->
                                 FilterChip(
                                     selected = selectedPacketSize == size,
-                                    onClick = {
-                                        selectedPacketSize = size
-                                        val bytes = selectedFileBytes
-                                        if (bytes != null && bytes.isNotEmpty()) {
-                                            coroutineScope.launch {
-                                                engine.prepare(
-                                                    data = bytes,
-                                                    filename = selectedFileName ?: "transmission.bin",
-                                                    mimoMode = selectedMimoMode,
-                                                    targetFps = selectedFps,
-                                                    packetSize = size
-                                                )
-                                            }
-                                        }
-                                    },
+                                    onClick = { selectedPacketSize = size },
                                     label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -510,6 +458,18 @@ fun TransmitterScreen() {
                                 color = Color.Black,
                                 fontSize = 15.sp
                             )
+                        }
+
+                        OutlinedButton(
+                            onClick = { engine.stop() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Edit Settings / Change Options", fontWeight = FontWeight.SemiBold)
                         }
 
                         Row(
