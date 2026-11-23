@@ -10,7 +10,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 object DiagnosticLogger {
-    private const val MAX_LOG_ENTRIES = 500
+    private const val MAX_LOG_ENTRIES = 2000
     private val logBuffer = LinkedList<String>()
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
@@ -40,7 +40,10 @@ object DiagnosticLogger {
         foundMagic: Boolean,
         magicBitOffset: Int,
         crcFailures: Int,
-        validPackets: Int
+        validPackets: Int,
+        detectionMethod: String = "ArUco",
+        quadSummary: String = "",
+        channelStatus: String = ""
     ) {
         val timestamp = dateFormat.format(Date())
         val first64Bits = bits.take(64).joinToString("") { if (it > 0) "1" else "0" }
@@ -59,12 +62,15 @@ object DiagnosticLogger {
 
         val entry = buildString {
             append("[$timestamp][FRAME #$frameIndex] ")
+            append("Mode: $detectionMethod | ")
+            if (quadSummary.isNotEmpty()) append("Geometry: [$quadSummary] | ")
             append("Corners: ${corners.size} | ")
             append(String.format(Locale.US, "Range: [%.1f - %.1f], Thresh: %.1f | ", minVal, maxVal, threshold))
             append("First8BytesHex: [${hexBuilder.toString().trim()}] | ")
             append("MagicFound: $foundMagic (offset=$magicBitOffset) | ")
-            append("Stats(Valid=$validPackets, CRC_Fail=$crcFailures)\n")
-            append("   Bits[0..63]: $first64Bits")
+            append("Stats(Valid=$validPackets, CRC_Fail=$crcFailures)")
+            if (channelStatus.isNotEmpty()) append(" | ChStatus: $channelStatus")
+            append("\n   Bits[0..63]: $first64Bits")
         }
 
         logBuffer.add(entry)

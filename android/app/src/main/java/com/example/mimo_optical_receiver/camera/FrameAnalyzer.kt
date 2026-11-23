@@ -205,6 +205,12 @@ class FrameAnalyzer(
                     // Decode each quadrant channel independently without serial concatenating or bit-slip
                     val validPackets = packetAssembler.processChannelBits(decodeResult.channelBits, activePacketSize)
 
+                    val chStatusSummary = if (validPackets.isNotEmpty()) {
+                        "Decoded=${validPackets.map { "Ch${it.channelId}:Seq#${it.sequenceId}" }.joinToString(",")}"
+                    } else {
+                        "NoValidPackets"
+                    }
+
                     DiagnosticLogger.logFrameDecode(
                         frameIndex = frameCount,
                         corners = detectionResult.screenCorners.map { Pair(it.x, it.y) },
@@ -215,7 +221,10 @@ class FrameAnalyzer(
                         foundMagic = packetAssembler.lastMagicFound,
                         magicBitOffset = packetAssembler.lastMagicBitOffset,
                         crcFailures = packetAssembler.crcFailedCount,
-                        validPackets = sequenceManager?.uniqueCount ?: 0
+                        validPackets = sequenceManager?.uniqueCount ?: 0,
+                        detectionMethod = detectionResult.detectionMethod,
+                        quadSummary = detectionResult.quadRatioSummary,
+                        channelStatus = chStatusSummary
                     )
 
                     if (validPackets.isNotEmpty()) {
